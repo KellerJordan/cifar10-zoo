@@ -151,7 +151,7 @@ hyp = {
     },
     'misc': {
         'ema': {
-            'epochs': 10, # Slight bug in that this counts only full epochs and then additionally runs the EMA for any fractional epochs at the end too
+            'start_epochs': 2,
             'decay_base': .95,
             'decay_pow': 3.,
             'every_n_steps': 5,
@@ -421,8 +421,7 @@ print_training_details(logging_columns_list, column_heads_only=True) ## print ou
 
 def main():
     # Initializing constants for the whole run.
-    net_ema = None ## Reset any existing network emas, we want to have _something_ to check for existence so we can initialize the EMA right from where the network is during training
-                   ## (as opposed to initializing the network_ema from the randomly-initialized starter network, then forcing it to play catch-up all of a sudden in the last several epochs)
+    net_ema = None
 
     total_time_seconds = 0.
     current_steps = 0.
@@ -431,10 +430,8 @@ def main():
     eval_batchsize = 2500
     test_loader = CifarLoader('/tmp/cifar10', train=False, batch_size=eval_batchsize)
 
-    # TODO: Doesn't currently account for partial epochs really (since we're not doing "real" epochs across the whole batchsize)....
-    num_steps_per_epoch      = len(train_loader.images) // batchsize
-    total_train_steps        = math.ceil(num_steps_per_epoch * hyp['misc']['train_epochs'])
-    ema_epoch_start          = math.floor(hyp['misc']['train_epochs']) - hyp['misc']['ema']['epochs']
+    total_train_steps = math.ceil(len(train_loader) * hyp['misc']['train_epochs'])
+    ema_epoch_start = hyp['misc']['ema']['start_epochs']
 
     ## I believe this wasn't logged, but the EMA update power is adjusted by being raised to the power of the number of "every n" steps
     ## to somewhat accomodate for whatever the expected information intake rate is. The tradeoff I believe, though, is that this is to some degree noisier as we
@@ -474,7 +471,7 @@ def main():
       net.train()
 
       for epoch_step, (inputs, labels) in enumerate(train_loader):
-          ## Run everything through the network
+
           outputs = net(inputs)
 
           loss_batchsize_scaler = 512/batchsize
@@ -487,15 +484,11 @@ def main():
 
           loss.backward()
 
-          ## Step for each optimizer, in turn.
           opt.step()
           opt_bias.step()
-
-          # We only want to step the lr_schedulers while we have training steps to consume. Otherwise we get a not-so-friendly error from PyTorch
           lr_sched.step()
           lr_sched_bias.step()
 
-          ## Using 'set_to_none' I believe is slightly faster (albeit riskier w/ funky gradient update workflows) than under the default 'set to zero' method
           opt.zero_grad(set_to_none=True)
           opt_bias.zero_grad(set_to_none=True)
 
@@ -505,9 +498,9 @@ def main():
               ## Initialize the ema from the network at this point in time if it does not already exist.... :D
               if net_ema is None: # don't snapshot the network yet if so!
                   net_ema = NetworkEMA(net)
-                  continue
-              # We warm up our ema's decay/momentum value over training exponentially according to the hyp config dictionary (this lets us move fast, then average strongly at the end).
-              net_ema.update(net, decay=projected_ema_decay_val*(current_steps/total_train_steps)**hyp['misc']['ema']['decay_pow'])
+              else:
+                  # We warm up our ema's decay/momentum value over training exponentially according to the hyp config dictionary (this lets us move fast, then average strongly at the end).
+                  net_ema.update(net, decay=projected_ema_decay_val*(current_steps/total_train_steps)**hyp['misc']['ema']['decay_pow'])
     
           if current_steps >= total_train_steps:
             break
@@ -519,21 +512,19 @@ def main():
       ####################
       # Evaluation  Mode #
       ####################
+
       net.eval()
-
       with torch.no_grad():
-
-          loss_list_val, acc_list, acc_list_ema = [], [], []
+          loss_list, acc_list, acc_list_ema = [], [], []
           for inputs, labels in test_loader:
               outputs = net(inputs)
-              loss_list_val.append(loss_fn(outputs, labels).float().mean())
+              loss_list.append(loss_fn(outputs, labels).float().mean())
               acc_list.append((outputs.argmax(-1) == labels).float().mean())
               if net_ema:
                   outputs = net_ema(inputs)
                   acc_list_ema.append((outputs.argmax(-1) == labels).float().mean())
-              
           val_acc = torch.stack(acc_list).mean().item()
-          val_loss = torch.stack(loss_list_val).mean().item()
+          val_loss = torch.stack(loss_list).mean().item()
           ema_val_acc = None
           if net_ema:
               ema_val_acc = torch.stack(acc_list_ema).mean().item()
