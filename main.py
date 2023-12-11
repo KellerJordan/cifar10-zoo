@@ -473,11 +473,6 @@ def main():
       starter.record()
       net.train()
 
-      loss_train = None
-      accuracy_train = None
-
-      epoch_fraction = 1 if epoch + 1 < hyp['misc']['train_epochs'] else hyp['misc']['train_epochs'] % 1 # We need to know if we're running a partial epoch or not.
-
       for epoch_step, (inputs, labels) in enumerate(train_loader):
           ## Run everything through the network
           outputs = net(inputs)
