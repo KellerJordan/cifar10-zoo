@@ -292,7 +292,7 @@ class SpeedyConvNet(nn.Module):
         return x
 
 def make_net(train_images):
-    whiten_conv_depth = 2 * 3*hyp['net']['whitening']['kernel_size']**2
+    whiten_conv_depth = 2 * 3 * hyp['net']['whitening']['kernel_size']**2
     network_dict = nn.ModuleDict({
         'initial_block': nn.ModuleDict({
             'whiten': Conv(3, whiten_conv_depth, kernel_size=hyp['net']['whitening']['kernel_size'], padding=0),
