@@ -38,8 +38,8 @@ def batch_crop(inputs, crop_size):
     cropped_batch = torch.masked_select(inputs, crop_mask)
     return cropped_batch.view(inputs.shape[0], inputs.shape[1], crop_size, crop_size)
 
-## This is a pre-padded variant of the main quick_cifar.CifarLoader. For random translation, we move the padding step
-## to __init__-time, rather than __iter__ time. This makes each epoch ~10ms faster.
+## This is a pre-padded variant of quick_cifar.CifarLoader which moves the padding step of random translate
+## from __iter__ to __init__, so that it doesn't need to be repeated each epoch.
 class CifarLoader:
 
     def __init__(self, path, train=True, batch_size=500, aug=None, keep_last=False, shuffle=None, gpu=0):
