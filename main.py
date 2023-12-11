@@ -1,4 +1,6 @@
-## https://github.com/KellerJordan/cifar10-loader/blob/master/quick_cifar/loader.py
+#############################################
+#            Standalone DataLoader          #
+#############################################
 import os
 from math import ceil
 import torch
@@ -9,7 +11,6 @@ import torchvision.transforms as T
 CIFAR_MEAN = torch.tensor((0.4914, 0.4822, 0.4465))
 CIFAR_STD = torch.tensor((0.2470, 0.2435, 0.2616))
 
-# https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py#L389
 def make_random_square_masks(inputs, size):
     is_even = int(size % 2 == 0)
     n,c,h,w = inputs.shape
@@ -93,6 +94,9 @@ class PrepadCifarLoader:
             idxs = indices[i*self.batch_size:(i+1)*self.batch_size]
             yield (images[idxs], self.labels[idxs])
 
+#############################################
+#            Setup/Hyperparameters          #
+#############################################
 import sys
 import uuid
 import numpy as np
