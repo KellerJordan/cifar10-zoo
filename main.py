@@ -147,7 +147,7 @@ hyp = {
             'decay_pow': 3.,
             'every_n_steps': 5,
         },
-        'train_epochs': 12.1,
+        'train_epochs': 12.0,
     }
 }
 
