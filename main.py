@@ -89,6 +89,7 @@ class CifarLoader:
 
 import sys
 import uuid
+import numpy as np
 
 # Note: The one change we need to make if we're in Colab is to uncomment this below block.
 # If we are in an ipython session or a notebook, clear the state to avoid bugs
@@ -427,35 +428,32 @@ def main():
     current_steps = 0.
 
     train_loader = CifarLoader('/tmp/cifar10', train=True, batch_size=batchsize, aug=dict(flip=True, translate=2))
-    eval_batchsize = 2500
-    test_loader = CifarLoader('/tmp/cifar10', train=False, batch_size=eval_batchsize)
+    test_loader = CifarLoader('/tmp/cifar10', train=False, batch_size=2500)
 
+    # Get network
+    train_images = train_loader.normalize(train_loader.images)
+    net = make_net(train_images)
+
+    # One optimizer for the regular network, and one for the biases.
+    non_bias_params, bias_params = init_split_parameter_dictionaries(net)
+    opt = torch.optim.SGD(**non_bias_params)
+    opt_bias = torch.optim.SGD(**bias_params)
+
+    # Learning rate and EMA scheduling
     total_train_steps = math.ceil(len(train_loader) * hyp['misc']['train_epochs'])
+    # Adjust pct_start based upon how many epochs we need to finetune the ema at a low lr for
+    pct_start = hyp['opt']['percent_start'] #* (total_train_steps/(total_train_steps - num_low_lr_steps_for_ema))
+    final_lr_ratio = .07 # Actually pretty important, apparently!
+    lr_schedule = np.interp(np.arange(1+total_train_steps), [0, int(pct_start * total_train_steps), total_train_steps], [0, 1, final_lr_ratio]) 
+    lr_sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_schedule.__getitem__)
+    lr_sched_bias = torch.optim.lr_scheduler.LambdaLR(opt_bias, lr_schedule.__getitem__)
+
     ema_epoch_start = hyp['misc']['ema']['start_epochs']
 
     ## I believe this wasn't logged, but the EMA update power is adjusted by being raised to the power of the number of "every n" steps
     ## to somewhat accomodate for whatever the expected information intake rate is. The tradeoff I believe, though, is that this is to some degree noisier as we
     ## are intaking fewer samples of our distribution-over-time, with a higher individual weight each. This can be good or bad depending upon what we want.
     projected_ema_decay_val  = hyp['misc']['ema']['decay_base'] ** hyp['misc']['ema']['every_n_steps']
-
-    # Adjust pct_start based upon how many epochs we need to finetune the ema at a low lr for
-    pct_start = hyp['opt']['percent_start'] #* (total_train_steps/(total_train_steps - num_low_lr_steps_for_ema))
-
-    # Get network
-    train_images = train_loader.normalize(train_loader.images)
-    net = make_net(train_images)
-
-    # One optimizer for the regular network, and one for the biases. This allows us to use the superconvergence onecycle training policy for our networks....
-    non_bias_params, bias_params = init_split_parameter_dictionaries(net)
-    opt = torch.optim.SGD(**non_bias_params)
-    opt_bias = torch.optim.SGD(**bias_params)
-
-    ## Not the most intuitive, but this basically takes us from ~0 to max_lr at the point pct_start, then down to .1 * max_lr at the end (since 1e16 * 1e-15 = .1 --
-    ##   This quirk is because the final lr value is calculated from the starting lr value and not from the maximum lr value set during training)
-    initial_div_factor = 1e16 # basically to make the initial lr ~0 or so :D
-    final_lr_ratio = .07 # Actually pretty important, apparently!
-    lr_sched      = torch.optim.lr_scheduler.OneCycleLR(opt,  max_lr=non_bias_params['lr'], pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=total_train_steps, anneal_strategy='linear', cycle_momentum=False)
-    lr_sched_bias = torch.optim.lr_scheduler.OneCycleLR(opt_bias, max_lr=bias_params['lr'], pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=total_train_steps, anneal_strategy='linear', cycle_momentum=False)
 
     ## For accurately timing GPU code
     starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
