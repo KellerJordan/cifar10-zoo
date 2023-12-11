@@ -359,8 +359,7 @@ class NetworkEMA(nn.Module):
                 if net_param.dtype in (torch.half, torch.float):
                     net_ema_param.lerp_(net_param.detach(), 1-decay) # linear interpolation
                     # And then we also copy the parameters back to the network, similarly to the Lookahead optimizer (but with a much more aggressive-at-the-end schedule)
-                    #if not ('norm' in param_name and 'weight' in param_name) and not 'whiten' in param_name:
-                    if not 'whiten' in param_name:
+                    if net_param.requires_grad:
                         net_param.copy_(net_ema_param.detach())
 
     def forward(self, inputs):
@@ -533,7 +532,7 @@ if __name__ == "__main__":
         code = f.read()
 
     acc_list = []
-    for run_num in range(25):
+    for run_num in range(400):
         acc_list.append(torch.tensor(main()))
     print("Mean/std:", (torch.mean(torch.stack(acc_list)).item(), torch.std(torch.stack(acc_list)).item()))
 
