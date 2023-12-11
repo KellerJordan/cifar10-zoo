@@ -528,14 +528,14 @@ def main():
               outputs = net(inputs)
               loss_list_val.append(loss_fn(outputs, labels).float().mean())
               acc_list.append((outputs.argmax(-1) == labels).float().mean())
-              if epoch >= ema_epoch_start:
+              if net_ema:
                   outputs = net_ema(inputs)
                   acc_list_ema.append((outputs.argmax(-1) == labels).float().mean())
               
           val_acc = torch.stack(acc_list).mean().item()
           val_loss = torch.stack(loss_list_val).mean().item()
           ema_val_acc = None
-          if epoch >= ema_epoch_start:
+          if net_ema:
               ema_val_acc = torch.stack(acc_list_ema).mean().item()
 
       # We basically need to look up local variables by name so we can have the names, so we can pad to the proper column width.
