@@ -44,7 +44,7 @@ def batch_cutout(inputs, size):
 
 ## This is a pre-padded variant of quick_cifar.CifarLoader which moves the padding step of random translate
 ## from __iter__ to __init__, so that it doesn't need to be repeated each epoch.
-class CifarLoader:
+class PrepadCifarLoader:
 
     def __init__(self, path, train=True, batch_size=500, aug=None, drop_last=None, shuffle=None, gpu=0):
         data_path = os.path.join(path, 'train.pt' if train else 'test.pt')
@@ -92,7 +92,6 @@ class CifarLoader:
         for i in range(len(self)):
             idxs = indices[i*self.batch_size:(i+1)*self.batch_size]
             yield (images[idxs], self.labels[idxs])
-
 
 import sys
 import uuid
@@ -368,7 +367,8 @@ class NetworkEMA(nn.Module):
                 if net_param.dtype in (torch.half, torch.float):
                     net_ema_param.lerp_(net_param.detach(), 1-decay) # linear interpolation
                     # And then we also copy the parameters back to the network, similarly to the Lookahead optimizer (but with a much more aggressive-at-the-end schedule)
-                    if net_param.requires_grad:
+                    #if not ('norm' in param_name and 'weight' in param_name) and not 'whiten' in param_name:
+                    if not 'whiten' in param_name:
                         net_param.copy_(net_ema_param.detach())
 
     def forward(self, inputs):
@@ -418,8 +418,8 @@ def main():
     current_steps = 0.
 
     train_augs = dict(flip=True, translate=hyp['net']['pad_amount'], cutout=hyp['net']['cutout_size'])
-    train_loader = CifarLoader('/tmp/cifar10', train=True, batch_size=batchsize, aug=train_augs)
-    test_loader = CifarLoader('/tmp/cifar10', train=False, batch_size=2500)
+    train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=batchsize, aug=train_augs)
+    test_loader = PrepadCifarLoader('/tmp/cifar10', train=False, batch_size=2500)
 
     # Get network
     train_images = train_loader.normalize(train_loader.images)
@@ -533,6 +533,7 @@ def main():
         # Print out our training details (sorry for the complexity, the whole logging business here is a bit of a hot mess once the columns need to be aligned and such....)
         ## We also check to see if we're in our final epoch so we can print the 'bottom' of the table for each round.
         print_training_details(list(map(partial(format_for_table, locals=locals()), logging_columns_list)), is_final_entry=(epoch >= math.ceil(hyp['misc']['train_epochs'] - 1)))
+
 
     return ema_val_acc # Return the final ema accuracy achieved (not using the 'best accuracy' selection strategy, which I think is okay here....)
 
