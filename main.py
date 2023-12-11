@@ -29,8 +29,8 @@ def make_random_square_masks(inputs, size):
 
     return final_mask
 
-def batch_flip_lr(inputs, flip_chance=0.5):
-    flip_mask = (torch.rand(len(inputs)) < 0.5).view(-1, 1, 1, 1).to(inputs.device)
+def batch_flip_lr(inputs):
+    flip_mask = (torch.rand(len(inputs), device=inputs.device) < 0.5).view(-1, 1, 1, 1)
     return torch.where(flip_mask, inputs.flip(-1), inputs)
 
 def batch_crop(inputs, crop_size):
@@ -38,11 +38,15 @@ def batch_crop(inputs, crop_size):
     cropped_batch = torch.masked_select(inputs, crop_mask)
     return cropped_batch.view(inputs.shape[0], inputs.shape[1], crop_size, crop_size)
 
+def batch_cutout(inputs, size):
+    cutout_masks = make_random_square_masks(inputs, size)
+    return inputs.masked_fill(cutout_masks, 0)
+
 ## This is a pre-padded variant of quick_cifar.CifarLoader which moves the padding step of random translate
 ## from __iter__ to __init__, so that it doesn't need to be repeated each epoch.
 class CifarLoader:
 
-    def __init__(self, path, train=True, batch_size=500, aug=None, keep_last=False, shuffle=None, gpu=0):
+    def __init__(self, path, train=True, batch_size=500, aug=None, drop_last=None, shuffle=None, gpu=0):
         data_path = os.path.join(path, 'train.pt' if train else 'test.pt')
         if not os.path.exists(data_path):
             dset = torchvision.datasets.CIFAR10(path, download=True, train=train)
@@ -60,14 +64,14 @@ class CifarLoader:
         
         self.aug = aug or {}
         for k in self.aug.keys():
-            assert k in ['flip', 'translate'], 'Unrecognized key: %s' % k
+            assert k in ['flip', 'translate', 'cutout'], 'Unrecognized key: %s' % k
 
         # Pre-pad images to save time when doing random translation
         pad = self.aug.get('translate', 0)
         self.prepad_images = F.pad(self.images, (pad,)*4, 'reflect')
 
         self.batch_size = batch_size
-        self.keep_last = keep_last
+        self.drop_last = train if drop_last is None else drop_last
         self.shuffle = train if shuffle is None else shuffle
 
     def augment_prepad(self, images):
@@ -75,10 +79,12 @@ class CifarLoader:
         images = batch_crop(images, self.images.shape[-2])
         if self.aug.get('flip', False):
             images = batch_flip_lr(images)
+        if self.aug.get('cutout', 0) > 0:
+            images = batch_cutout(images, self.aug['cutout'])
         return images
 
     def __len__(self):
-        return ceil(len(self.images)/self.batch_size) if self.keep_last else len(self.images)//self.batch_size
+        return len(self.images)//self.batch_size if self.drop_last else ceil(len(self.images)/self.batch_size)
 
     def __iter__(self):
         images = self.augment_prepad(self.prepad_images)
@@ -86,6 +92,7 @@ class CifarLoader:
         for i in range(len(self)):
             idxs = indices[i*self.batch_size:(i+1)*self.batch_size]
             yield (images[idxs], self.labels[idxs])
+
 
 import sys
 import uuid
@@ -137,6 +144,8 @@ hyp = {
         'whitening': {
             'kernel_size': 2,
         },
+        'pad_amount': 2,
+        'cutout_size': 0,
         'batch_norm_momentum': .4, # * Don't forget momentum is 1 - momentum here (due to a quirk in the original paper... >:( )
         'base_depth': 64 ## This should be a factor of 8 in some way to stay tensor core friendly
     },
@@ -408,7 +417,8 @@ def main():
     total_time_seconds = 0.
     current_steps = 0.
 
-    train_loader = CifarLoader('/tmp/cifar10', train=True, batch_size=batchsize, aug=dict(flip=True, translate=2))
+    train_augs = dict(flip=True, translate=hyp['net']['pad_amount'], cutout=hyp['net']['cutout_size'])
+    train_loader = CifarLoader('/tmp/cifar10', train=True, batch_size=batchsize, aug=train_augs)
     test_loader = CifarLoader('/tmp/cifar10', train=False, batch_size=2500)
 
     # Get network
@@ -532,12 +542,12 @@ if __name__ == "__main__":
         code = f.read()
 
     acc_list = []
-    for run_num in range(1):
+    for run_num in range(25):
         acc_list.append(torch.tensor(main()))
     print("Mean/std:", (torch.mean(torch.stack(acc_list)).item(), torch.std(torch.stack(acc_list)).item()))
 
     log = {'code': code, 'accs': acc_list}
     log_dir = os.path.join('logs', str(uuid.uuid4()))
     os.makedirs(log_dir, exist_ok=True)
-    #torch.save(log, os.path.join(log_dir, 'log.pt'))
+    torch.save(log, os.path.join(log_dir, 'log.pt'))
 
