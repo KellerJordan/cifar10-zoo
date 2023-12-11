@@ -1,5 +1,7 @@
 [![Twitter URL](https://img.shields.io/twitter/url/https/twitter.com/hi_tysam.svg?style=social&label=Follow%20%40TySam_And)](https://twitter.com/hi_tysam)
 
+5.8 seconds
+
 ## CIFAR10 hyperlightspeedbench
 Welcome to the hyperlightspeedbench CIFAR-10 (HLB-CIFAR10) repo.
 
