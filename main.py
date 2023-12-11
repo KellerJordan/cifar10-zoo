@@ -141,7 +141,6 @@ hyp = {
         'non_bias_decay': 6.687e-4 * batchsize,
         'scaling_factor': 1./9,
         'percent_start': .23,
-        'loss_scale_scaler': 1./32, # * Regularizer inside the loss summing (range: ~1/512 - 16+). FP8 should help with this somewhat too, whenever it comes out. :)
     },
     'net': {
         'whitening': {
@@ -381,8 +380,8 @@ class NetworkEMA(nn.Module):
         return self.net_ema(inputs)
 
 def init_split_parameter_dictionaries(network):
-    params_non_bias = {'params': [], 'lr': hyp['opt']['non_bias_lr'], 'momentum': .85, 'nesterov': True, 'weight_decay': hyp['opt']['non_bias_decay'], 'foreach': True}
-    params_bias     = {'params': [], 'lr': hyp['opt']['bias_lr'],     'momentum': .85, 'nesterov': True, 'weight_decay': hyp['opt']['bias_decay'], 'foreach': True}
+    params_non_bias = {'params': [], 'lr': hyp['opt']['non_bias_lr'], 'momentum': .85, 'nesterov': True, 'weight_decay': hyp['opt']['non_bias_decay']}
+    params_bias     = {'params': [], 'lr': hyp['opt']['bias_lr'],     'momentum': .85, 'nesterov': True, 'weight_decay': hyp['opt']['bias_decay']}
 
     for name, p in network.named_parameters():
         if p.requires_grad:
@@ -429,6 +428,8 @@ def main():
     current_steps = 0.
 
     train_loader = CifarLoader('/tmp/cifar10', train=True, batch_size=batchsize, aug=dict(flip=True, translate=2))
+    eval_batchsize = 2500
+    test_loader = CifarLoader('/tmp/cifar10', train=False, batch_size=eval_batchsize)
 
     # TODO: Doesn't currently account for partial epochs really (since we're not doing "real" epochs across the whole batchsize)....
     num_steps_per_epoch      = len(train_loader.images) // batchsize
@@ -483,10 +484,8 @@ def main():
           ## Run everything through the network
           outputs = net(inputs)
 
-          loss_batchsize_scaler = 512/batchsize # to scale to keep things at a relatively similar amount of regularization when we change our batchsize since we're summing over the whole batch
-          ## If you want to add other losses or hack around with the loss, you can do that here.
-          loss = loss_fn(outputs, labels).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler']) ## Note, as noted in the original blog posts, the summing here does a kind of loss scaling
-                                                 ## (and is thus batchsize dependent as a result). This can be somewhat good or bad, depending...
+          loss_batchsize_scaler = 512/batchsize
+          loss = loss_batchsize_scaler * loss_fn(outputs, labels).sum()
 
           # we only take the last-saved accs and losses from train
           if epoch_step == len(train_loader)-1:
@@ -506,6 +505,7 @@ def main():
           ## Using 'set_to_none' I believe is slightly faster (albeit riskier w/ funky gradient update workflows) than under the default 'set to zero' method
           opt.zero_grad(set_to_none=True)
           opt_bias.zero_grad(set_to_none=True)
+
           current_steps += 1
 
           if epoch >= ema_epoch_start and current_steps % hyp['misc']['ema']['every_n_steps'] == 0:          
@@ -528,9 +528,6 @@ def main():
       ####################
       net.eval()
 
-      eval_batchsize = 2500
-      test_loader = CifarLoader('/tmp/cifar10', train=False, batch_size=eval_batchsize)
-      assert len(test_loader.images) % eval_batchsize == 0, "Error: The eval batchsize must evenly divide the eval dataset (for now, we don't have drop_remainder implemented yet)."
       loss_list_val, acc_list, acc_list_ema = [], [], []
       
       with torch.no_grad():
