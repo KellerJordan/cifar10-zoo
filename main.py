@@ -448,10 +448,8 @@ def main():
     train_images = train_loader.normalize(train_loader.images)
     net = make_net(train_images)
 
-    ## Stowing the creation of these into a helper function to make things a bit more readable....
-    non_bias_params, bias_params = init_split_parameter_dictionaries(net)
-
     # One optimizer for the regular network, and one for the biases. This allows us to use the superconvergence onecycle training policy for our networks....
+    non_bias_params, bias_params = init_split_parameter_dictionaries(net)
     opt = torch.optim.SGD(**non_bias_params)
     opt_bias = torch.optim.SGD(**bias_params)
 
@@ -528,24 +526,23 @@ def main():
       ####################
       net.eval()
 
-      loss_list_val, acc_list, acc_list_ema = [], [], []
-      
       with torch.no_grad():
+
+          loss_list_val, acc_list, acc_list_ema = [], [], []
           for inputs, labels in test_loader:
-              if epoch >= ema_epoch_start:
-                  outputs = net_ema(inputs)
-                  acc_list_ema.append((outputs.argmax(-1) == labels).float().mean())
               outputs = net(inputs)
               loss_list_val.append(loss_fn(outputs, labels).float().mean())
               acc_list.append((outputs.argmax(-1) == labels).float().mean())
+              if epoch >= ema_epoch_start:
+                  outputs = net_ema(inputs)
+                  acc_list_ema.append((outputs.argmax(-1) == labels).float().mean())
               
           val_acc = torch.stack(acc_list).mean().item()
+          val_loss = torch.stack(loss_list_val).mean().item()
           ema_val_acc = None
-          # TODO: We can fuse these two operations (just above and below) all-together like :D :))))
           if epoch >= ema_epoch_start:
               ema_val_acc = torch.stack(acc_list_ema).mean().item()
 
-          val_loss = torch.stack(loss_list_val).mean().item()
       # We basically need to look up local variables by name so we can have the names, so we can pad to the proper column width.
       ## Printing stuff in the terminal can get tricky and this used to use an outside library, but some of the required stuff seemed even
       ## more heinous than this, unfortunately. So we switched to the "more simple" version of this!
