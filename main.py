@@ -148,7 +148,6 @@ hyp = {
             'kernel_size': 2,
         },
         'batch_norm_momentum': .4, # * Don't forget momentum is 1 - momentum here (due to a quirk in the original paper... >:( )
-        'pad_amount': 2,
         'base_depth': 64 ## This should be a factor of 8 in some way to stay tensor core friendly
     },
     'misc': {
@@ -274,10 +273,9 @@ def init_whitening_conv(layer, train_set, eps=1e-2):
 
 scaler = 2. ## You can play with this on your own if you want, for the first beta I wanted to keep things simple (for now) and leave it out of the hyperparams dict
 depths = {
-    'init':   round(scaler**-1*hyp['net']['base_depth']), # 32  w/ scaler at base value
-    'block1': round(scaler** 0*hyp['net']['base_depth']), # 64  w/ scaler at base value
-    'block2': round(scaler** 2*hyp['net']['base_depth']), # 256 w/ scaler at base value
-    'block3': round(scaler** 3*hyp['net']['base_depth']), # 512 w/ scaler at base value
+    'block1': round(scaler**0 * hyp['net']['base_depth']), # 64  w/ scaler at base value
+    'block2': round(scaler**2 * hyp['net']['base_depth']), # 256 w/ scaler at base value
+    'block3': round(scaler**3 * hyp['net']['base_depth']), # 512 w/ scaler at base value
     'num_classes': 10
 }
 
@@ -571,7 +569,7 @@ if __name__ == "__main__":
         code = f.read()
 
     acc_list = []
-    for run_num in range(1):
+    for run_num in range(25):
         acc_list.append(torch.tensor(main()))
     print("Mean/std:", (torch.mean(torch.stack(acc_list)).item(), torch.std(torch.stack(acc_list)).item()))
 
