@@ -91,16 +91,6 @@ import sys
 import uuid
 import numpy as np
 
-# Note: The one change we need to make if we're in Colab is to uncomment this below block.
-# If we are in an ipython session or a notebook, clear the state to avoid bugs
-"""
-try:
-  _ = get_ipython().__class__.__name__
-  ## we set -f below to avoid prompting the user before clearing the notebook state
-  %reset -f
-except NameError:
-  pass ## we're still good
-"""
 from functools import partial
 import math
 import os
@@ -136,7 +126,7 @@ bias_scaler = 64
 # To replicate the ~95.79%-accuracy-in-110-seconds runs, you can change the base_depth from 64->128, train_epochs from 12.1->90, ['ema'] epochs 10->80, cutmix_size 3->10, and cutmix_epochs 6->80
 hyp = {
     'opt': {
-        'bias_lr':        1.525 * bias_scaler/512, # TODO: Is there maybe a better way to express the bias and batchnorm scaling? :'))))
+        'bias_lr':        1.525 * bias_scaler / 512,
         'non_bias_lr':    1.525 / 512,
         'bias_decay':     6.687e-4 * batchsize/bias_scaler,
         'non_bias_decay': 6.687e-4 * batchsize,
@@ -302,17 +292,15 @@ class SpeedyConvNet(nn.Module):
         return x
 
 def make_net(train_images):
-    # TODO: A way to make this cleaner??
-    # Note, you have to specify any arguments overlapping with defaults (i.e. everything but in/out depths) as kwargs so that they are properly overridden (TODO cleanup somehow?)
-    whiten_conv_depth = 3*hyp['net']['whitening']['kernel_size']**2
+    whiten_conv_depth = 2 * 3*hyp['net']['whitening']['kernel_size']**2
     network_dict = nn.ModuleDict({
         'initial_block': nn.ModuleDict({
-            'whiten': Conv(3, 2*whiten_conv_depth, kernel_size=hyp['net']['whitening']['kernel_size'], padding=0),
+            'whiten': Conv(3, whiten_conv_depth, kernel_size=hyp['net']['whitening']['kernel_size'], padding=0),
             'activation': nn.GELU(),
         }),
-        'conv_group_1': ConvGroup(2*whiten_conv_depth, depths['block1']),
-        'conv_group_2': ConvGroup(depths['block1'],    depths['block2']),
-        'conv_group_3': ConvGroup(depths['block2'],    depths['block3']),
+        'conv_group_1': ConvGroup(whiten_conv_depth, depths['block1']),
+        'conv_group_2': ConvGroup(depths['block1'],  depths['block2']),
+        'conv_group_3': ConvGroup(depths['block2'],  depths['block3']),
         'pooling': FastGlobalMaxPooling(),
         'linear': Linear(depths['block3'], depths['num_classes'], bias=False, temperature=hyp['opt']['scaling_factor']),
     })
@@ -322,7 +310,6 @@ def make_net(train_images):
     net = net.to(memory_format=torch.channels_last) # to appropriately use tensor cores/avoid thrash while training
     net.train()
     net.half() # Convert network to half before initializing the initial whitening layer.
-
 
     with torch.no_grad():
         init_whitening_conv(net.net_dict['initial_block']['whiten'],
@@ -355,9 +342,7 @@ def make_net(train_images):
                 ## sure about this, however, it will require some more investigation. For now -- it works! D:
                 torch.nn.init.dirac_(block.conv2.weight)
 
-
     return net
-
 
 ########################################
 #          Training Helpers            #
@@ -366,16 +351,16 @@ def make_net(train_images):
 class NetworkEMA(nn.Module):
     def __init__(self, net):
         super().__init__()
-        self.net_ema = copy.deepcopy(net).eval().requires_grad_(False)
+        self.net_ema = copy.deepcopy(net).eval()
 
-    def update(self, current_net, decay):
+    def update(self, net, decay):
         with torch.no_grad():
-            for ema_net_parameter, (parameter_name, incoming_net_parameter) in zip(self.net_ema.state_dict().values(), current_net.state_dict().items()):
-                if incoming_net_parameter.dtype in (torch.half, torch.float):
-                    ema_net_parameter.lerp_(incoming_net_parameter.detach(), 1-decay) # linear interpolation
+            for net_ema_param, (param_name, net_param) in zip(self.net_ema.state_dict().values(), net.state_dict().items()):
+                if net_param.dtype in (torch.half, torch.float):
+                    net_ema_param.lerp_(net_param.detach(), 1-decay) # linear interpolation
                     # And then we also copy the parameters back to the network, similarly to the Lookahead optimizer (but with a much more aggressive-at-the-end schedule)
-                    if not ('norm' in parameter_name and 'weight' in parameter_name) and not 'whiten' in parameter_name:
-                        incoming_net_parameter.copy_(ema_net_parameter.detach())
+                    if not ('norm' in param_name and 'weight' in param_name) and not 'whiten' in param_name:
+                        net_param.copy_(net_ema_param.detach())
 
     def forward(self, inputs):
         return self.net_ema(inputs)
@@ -383,7 +368,6 @@ class NetworkEMA(nn.Module):
 def init_split_parameter_dictionaries(network):
     params_non_bias = {'params': [], 'lr': hyp['opt']['non_bias_lr'], 'momentum': .85, 'nesterov': True, 'weight_decay': hyp['opt']['non_bias_decay']}
     params_bias     = {'params': [], 'lr': hyp['opt']['bias_lr'],     'momentum': .85, 'nesterov': True, 'weight_decay': hyp['opt']['bias_decay']}
-
     for name, p in network.named_parameters():
         if p.requires_grad:
             if 'bias' in name:
@@ -391,9 +375,6 @@ def init_split_parameter_dictionaries(network):
             else:
                 params_non_bias['params'].append(p)
     return params_non_bias, params_bias
-
-
-loss_fn = nn.CrossEntropyLoss(label_smoothing=0.2, reduction='none')
 
 logging_columns_list = ['epoch', 'train_loss', 'val_loss', 'train_acc', 'val_acc', 'ema_val_acc', 'total_time_seconds']
 # define the printing function and print the column heads
@@ -434,6 +415,9 @@ def main():
     train_images = train_loader.normalize(train_loader.images)
     net = make_net(train_images)
 
+    # Loss function is smoothed cross-entropy
+    loss_fn = nn.CrossEntropyLoss(label_smoothing=0.2, reduction='none')
+
     # One optimizer for the regular network, and one for the biases.
     non_bias_params, bias_params = init_split_parameter_dictionaries(net)
     opt = torch.optim.SGD(**non_bias_params)
@@ -459,11 +443,12 @@ def main():
     starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
     torch.cuda.synchronize() ## clean up any pre-net setup operations
 
-
     for epoch in range(math.ceil(hyp['misc']['train_epochs'])):
+
       #################
       # Training Mode #
       #################
+
       torch.cuda.synchronize()
       starter.record()
       net.train()
