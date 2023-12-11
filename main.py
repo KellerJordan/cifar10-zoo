@@ -445,84 +445,84 @@ def main():
 
     for epoch in range(math.ceil(hyp['misc']['train_epochs'])):
 
-      #################
-      # Training Mode #
-      #################
+        #################
+        # Training Mode #
+        #################
 
-      torch.cuda.synchronize()
-      starter.record()
-      net.train()
+        torch.cuda.synchronize()
+        starter.record()
+        net.train()
 
-      for epoch_step, (inputs, labels) in enumerate(train_loader):
+        for epoch_step, (inputs, labels) in enumerate(train_loader):
 
-          outputs = net(inputs)
+            outputs = net(inputs)
 
-          loss_batchsize_scaler = 512/batchsize
-          loss = loss_batchsize_scaler * loss_fn(outputs, labels).sum()
+            loss_batchsize_scaler = 512/batchsize
+            loss = loss_batchsize_scaler * loss_fn(outputs, labels).sum()
 
-          # we only take the last-saved accs and losses from train
-          if epoch_step == len(train_loader)-1:
-              train_acc = (outputs.detach().argmax(-1) == labels).float().mean().item()
-              train_loss = loss.detach().cpu().item()/(batchsize*loss_batchsize_scaler)
+            # we only take the last-saved accs and losses from train
+            if epoch_step == len(train_loader)-1:
+                train_acc = (outputs.detach().argmax(-1) == labels).float().mean().item()
+                train_loss = loss.detach().cpu().item()/(batchsize*loss_batchsize_scaler)
 
-          loss.backward()
+            loss.backward()
 
-          opt.step()
-          opt_bias.step()
-          lr_sched.step()
-          lr_sched_bias.step()
+            opt.step()
+            opt_bias.step()
+            lr_sched.step()
+            lr_sched_bias.step()
 
-          opt.zero_grad(set_to_none=True)
-          opt_bias.zero_grad(set_to_none=True)
+            opt.zero_grad(set_to_none=True)
+            opt_bias.zero_grad(set_to_none=True)
 
-          current_steps += 1
+            current_steps += 1
 
-          if epoch >= ema_epoch_start and current_steps % hyp['misc']['ema']['every_n_steps'] == 0:          
-              ## Initialize the ema from the network at this point in time if it does not already exist.... :D
-              if net_ema is None: # don't snapshot the network yet if so!
-                  net_ema = NetworkEMA(net)
-              else:
-                  # We warm up our ema's decay/momentum value over training exponentially according to the hyp config dictionary (this lets us move fast, then average strongly at the end).
-                  net_ema.update(net, decay=projected_ema_decay_val*(current_steps/total_train_steps)**hyp['misc']['ema']['decay_pow'])
-    
-          if current_steps >= total_train_steps:
-            break
+            if epoch >= ema_epoch_start and current_steps % hyp['misc']['ema']['every_n_steps'] == 0:          
+                ## Initialize the ema from the network at this point in time if it does not already exist.... :D
+                if net_ema is None: # don't snapshot the network yet if so!
+                    net_ema = NetworkEMA(net)
+                else:
+                    # We warm up our ema's decay/momentum value over training exponentially according to the hyp config dictionary (this lets us move fast, then average strongly at the end).
+                    net_ema.update(net, decay=projected_ema_decay_val*(current_steps/total_train_steps)**hyp['misc']['ema']['decay_pow'])
 
-      ender.record()
-      torch.cuda.synchronize()
-      total_time_seconds += 1e-3 * starter.elapsed_time(ender)
+            if current_steps >= total_train_steps:
+                break
 
-      ####################
-      # Evaluation  Mode #
-      ####################
+        ender.record()
+        torch.cuda.synchronize()
+        total_time_seconds += 1e-3 * starter.elapsed_time(ender)
 
-      net.eval()
-      with torch.no_grad():
-          loss_list, acc_list, acc_list_ema = [], [], []
-          for inputs, labels in test_loader:
-              outputs = net(inputs)
-              loss_list.append(loss_fn(outputs, labels).float().mean())
-              acc_list.append((outputs.argmax(-1) == labels).float().mean())
-              if net_ema:
-                  outputs = net_ema(inputs)
-                  acc_list_ema.append((outputs.argmax(-1) == labels).float().mean())
-          val_acc = torch.stack(acc_list).mean().item()
-          val_loss = torch.stack(loss_list).mean().item()
-          ema_val_acc = None
-          if net_ema:
-              ema_val_acc = torch.stack(acc_list_ema).mean().item()
+        ####################
+        # Evaluation  Mode #
+        ####################
 
-      # We basically need to look up local variables by name so we can have the names, so we can pad to the proper column width.
-      ## Printing stuff in the terminal can get tricky and this used to use an outside library, but some of the required stuff seemed even
-      ## more heinous than this, unfortunately. So we switched to the "more simple" version of this!
-      format_for_table = lambda x, locals: (f"{locals[x]}".rjust(len(x))) \
-                                                if type(locals[x]) == int else "{:0.4f}".format(locals[x]).rjust(len(x)) \
-                                            if locals[x] is not None \
-                                            else " "*len(x)
+        net.eval()
+        with torch.no_grad():
+            loss_list, acc_list, acc_list_ema = [], [], []
+            for inputs, labels in test_loader:
+                outputs = net(inputs)
+                loss_list.append(loss_fn(outputs, labels).float().mean())
+                acc_list.append((outputs.argmax(-1) == labels).float().mean())
+                if net_ema:
+                    outputs = net_ema(inputs)
+                    acc_list_ema.append((outputs.argmax(-1) == labels).float().mean())
+            val_acc = torch.stack(acc_list).mean().item()
+            val_loss = torch.stack(loss_list).mean().item()
+            ema_val_acc = None
+            if net_ema:
+                ema_val_acc = torch.stack(acc_list_ema).mean().item()
 
-      # Print out our training details (sorry for the complexity, the whole logging business here is a bit of a hot mess once the columns need to be aligned and such....)
-      ## We also check to see if we're in our final epoch so we can print the 'bottom' of the table for each round.
-      print_training_details(list(map(partial(format_for_table, locals=locals()), logging_columns_list)), is_final_entry=(epoch >= math.ceil(hyp['misc']['train_epochs'] - 1)))
+        # We basically need to look up local variables by name so we can have the names, so we can pad to the proper column width.
+        ## Printing stuff in the terminal can get tricky and this used to use an outside library, but some of the required stuff seemed even
+        ## more heinous than this, unfortunately. So we switched to the "more simple" version of this!
+        format_for_table = lambda x, locals: (f"{locals[x]}".rjust(len(x))) \
+                           if type(locals[x]) == int else "{:0.4f}".format(locals[x]).rjust(len(x)) \
+                           if locals[x] is not None \
+                           else " "*len(x)
+
+        # Print out our training details (sorry for the complexity, the whole logging business here is a bit of a hot mess once the columns need to be aligned and such....)
+        ## We also check to see if we're in our final epoch so we can print the 'bottom' of the table for each round.
+        print_training_details(list(map(partial(format_for_table, locals=locals()), logging_columns_list)), is_final_entry=(epoch >= math.ceil(hyp['misc']['train_epochs'] - 1)))
 
     return ema_val_acc # Return the final ema accuracy achieved (not using the 'best accuracy' selection strategy, which I think is okay here....)
 
@@ -532,12 +532,12 @@ if __name__ == "__main__":
         code = f.read()
 
     acc_list = []
-    for run_num in range(400):
+    for run_num in range(1):
         acc_list.append(torch.tensor(main()))
     print("Mean/std:", (torch.mean(torch.stack(acc_list)).item(), torch.std(torch.stack(acc_list)).item()))
 
     log = {'code': code, 'accs': acc_list}
     log_dir = os.path.join('logs', str(uuid.uuid4()))
     os.makedirs(log_dir, exist_ok=True)
-    torch.save(log, os.path.join(log_dir, 'log.pt'))
+    #torch.save(log, os.path.join(log_dir, 'log.pt'))
 
