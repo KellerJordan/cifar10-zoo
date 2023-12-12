@@ -136,13 +136,13 @@ bias_scaler = 64
 # To replicate the ~95.79%-accuracy-in-110-seconds runs, you can change the base_depth from 64->128, train_epochs from 12.1->90, ['ema'] epochs 10->80, cutmix_size 3->10, and cutmix_epochs 6->80
 hyp = {
     'opt': {
-        'bias_lr':        1.525 * bias_scaler / 512,
-        'non_bias_lr':    1.525 / 512,
-        'bias_decay':     6.687e-4 * batchsize/bias_scaler,
-        'non_bias_decay': 6.687e-4 * batchsize,
+        'bias_lr':        1.525 * bias_scaler / 1024,
+        'non_bias_lr':    1.525 / 1024,
+        'bias_decay':     2 * 6.687e-4 * batchsize/bias_scaler,
+        'non_bias_decay': 2 * 6.687e-4 * batchsize,
         'scaling_factor': 1./9,
         'percent_start': .23,
-        'loss_scale': 256,
+        'loss_scale': 32,
     },
     'net': {
         'whitening': {
@@ -447,7 +447,9 @@ def main():
     # Adjust pct_start based upon how many epochs we need to finetune the ema at a low lr for
     pct_start = hyp['opt']['percent_start'] #* (total_train_steps/(total_train_steps - num_low_lr_steps_for_ema))
     final_lr_ratio = .07 # Actually pretty important, apparently!
-    lr_schedule = np.interp(np.arange(1+total_train_steps), [0, int(pct_start * total_train_steps), total_train_steps], [0, 1, final_lr_ratio]) 
+    lr_schedule = np.interp(np.arange(1+total_train_steps),
+                            [0, int(pct_start * total_train_steps), total_train_steps],
+                            [0, 1, final_lr_ratio]) 
     lr_sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_schedule.__getitem__)
 
     ema_epoch_start = hyp['misc']['ema']['start_epochs']
@@ -474,16 +476,9 @@ def main():
         for epoch_step, (inputs, labels) in enumerate(train_loader):
 
             outputs = net(inputs)
-
-            loss_batchsize_scaler = 512/batchsize
-            loss = loss_batchsize_scaler * loss_fn(outputs, labels).sum()
-
-            # we only take the last-saved accs and losses from train
-            if epoch_step == len(train_loader)-1:
-                train_acc = (outputs.detach().argmax(-1) == labels).float().mean().item()
-                train_loss = loss.detach().cpu().item()/(batchsize*loss_batchsize_scaler)
-
-            (hyp['opt']['loss_scale'] * loss).backward()
+            loss = loss_fn(outputs, labels).sum()
+            loss_scaled = hyp['opt']['loss_scale'] * loss
+            loss_scaled.backward()
 
             opt.step()
             opt.zero_grad(set_to_none=True)
@@ -505,10 +500,14 @@ def main():
         ender.record()
         torch.cuda.synchronize()
         total_time_seconds += 1e-3 * starter.elapsed_time(ender)
-
+        
         ####################
         # Evaluation  Mode #
         ####################
+
+        ## Get the accuracy and loss of the last batch of training data
+        train_acc = (outputs.detach().argmax(-1) == labels).float().mean().item()
+        train_loss = loss.item() / batchsize
 
         net.eval()
         with torch.no_grad():
