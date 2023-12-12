@@ -142,6 +142,7 @@ hyp = {
         'non_bias_decay': 6.687e-4 * batchsize,
         'scaling_factor': 1./9,
         'percent_start': .23,
+        'loss_scale': 256,
     },
     'net': {
         'whitening': {
@@ -379,15 +380,20 @@ class NetworkEMA(nn.Module):
         return self.net_ema(inputs)
 
 def init_split_parameter_dictionaries(network):
-    params_non_bias = {'params': [], 'lr': hyp['opt']['non_bias_lr'], 'momentum': .85, 'nesterov': True, 'weight_decay': hyp['opt']['non_bias_decay']}
-    params_bias     = {'params': [], 'lr': hyp['opt']['bias_lr'],     'momentum': .85, 'nesterov': True, 'weight_decay': hyp['opt']['bias_decay']}
+    loss_scale = hyp['opt']['loss_scale']
+    wd_nonbias = hyp['opt']['non_bias_decay'] * loss_scale
+    wd_bias = hyp['opt']['bias_decay'] * loss_scale
+    lr_nonbias = hyp['opt']['non_bias_lr'] / loss_scale
+    lr_bias = hyp['opt']['bias_lr'] / loss_scale
+    hyp_nonbias = {'params': [], 'lr': lr_nonbias, 'momentum': .85, 'nesterov': True, 'weight_decay': wd_nonbias}
+    hyp_bias    = {'params': [], 'lr': lr_bias,    'momentum': .85, 'nesterov': True, 'weight_decay': wd_bias}
     for name, p in network.named_parameters():
         if p.requires_grad:
             if 'bias' in name:
-                params_bias['params'].append(p)
+                hyp_bias['params'].append(p)
             else:
-                params_non_bias['params'].append(p)
-    return params_non_bias, params_bias
+                hyp_nonbias['params'].append(p)
+    return hyp_nonbias, hyp_bias
 
 logging_columns_list = ['epoch', 'train_loss', 'val_loss', 'train_acc', 'val_acc', 'ema_val_acc', 'total_time_seconds']
 # define the printing function and print the column heads
@@ -434,8 +440,7 @@ def main():
 
     # One optimizer for the regular network, and one for the biases.
     non_bias_params, bias_params = init_split_parameter_dictionaries(net)
-    opt = torch.optim.SGD(**non_bias_params)
-    opt_bias = torch.optim.SGD(**bias_params)
+    opt = torch.optim.SGD([non_bias_params, bias_params])
 
     # Learning rate and EMA scheduling
     total_train_steps = math.ceil(len(train_loader) * hyp['misc']['train_epochs'])
@@ -444,7 +449,6 @@ def main():
     final_lr_ratio = .07 # Actually pretty important, apparently!
     lr_schedule = np.interp(np.arange(1+total_train_steps), [0, int(pct_start * total_train_steps), total_train_steps], [0, 1, final_lr_ratio]) 
     lr_sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_schedule.__getitem__)
-    lr_sched_bias = torch.optim.lr_scheduler.LambdaLR(opt_bias, lr_schedule.__getitem__)
 
     ema_epoch_start = hyp['misc']['ema']['start_epochs']
 
@@ -479,15 +483,11 @@ def main():
                 train_acc = (outputs.detach().argmax(-1) == labels).float().mean().item()
                 train_loss = loss.detach().cpu().item()/(batchsize*loss_batchsize_scaler)
 
-            loss.backward()
+            (hyp['opt']['loss_scale'] * loss).backward()
 
             opt.step()
-            opt_bias.step()
-            lr_sched.step()
-            lr_sched_bias.step()
-
             opt.zero_grad(set_to_none=True)
-            opt_bias.zero_grad(set_to_none=True)
+            lr_sched.step()
 
             current_steps += 1
 
