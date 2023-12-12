@@ -1,5 +1,76 @@
 #############################################
-#            Standalone DataLoader          #
+#            Setup/Hyperparameters          #
+#############################################
+
+import sys
+import uuid
+import numpy as np
+
+from functools import partial
+import math
+import os
+import copy
+
+import torch
+from torch import nn
+import torch.nn.functional as F
+
+## <-- teaching comments
+# <-- functional comments
+# You can run 'sed -i.bak '/\#\#/d' ./main.py' to remove the teaching comments if they are in the way of your work. <3
+
+# This can go either way in terms of actually being helpful when it comes to execution speed.
+#torch.backends.cudnn.benchmark = True
+
+# This code was built from the ground up to be directly hackable and to support rapid experimentation, which is something you might see
+# reflected in what would otherwise seem to be odd design decisions. It also means that maybe some cleaning up is required before moving
+# to production if you're going to use this code as such (such as breaking different section into unique files, etc). That said, if there's
+# ways this code could be improved and cleaned up, please do open a PR on the GitHub repo. Your support and help is much appreciated for this
+# project! :)
+
+
+# This is for testing that certain changes don't exceed some X% portion of the reference GPU (here an A100)
+# so we can help reduce a possibility that future releases don't take away the accessibility of this codebase.
+#torch.cuda.set_per_process_memory_fraction(fraction=6.5/40., device=0) ## 40. GB is the maximum memory of the base A100 GPU
+
+# set global defaults (in this particular file) for convolutions
+default_conv_kwargs = {'kernel_size': 3, 'padding': 'same', 'bias': False}
+
+batchsize = 1024
+bias_scaler = 64
+# To replicate the ~95.79%-accuracy-in-110-seconds runs, you can change the base_depth from 64->128, train_epochs from 12.1->90, ['ema'] epochs 10->80, cutmix_size 3->10, and cutmix_epochs 6->80
+hyp = {
+    'opt': {
+        'bias_lr':        1.525 * bias_scaler / 1024,
+        'non_bias_lr':    1.525 / 1024,
+        'bias_decay':     2 * 6.687e-4 * batchsize/bias_scaler,
+        'non_bias_decay': 2 * 6.687e-4 * batchsize,
+        'scaling_factor': 1./9,
+        'percent_start': .23,
+        'loss_scale': 32,
+    },
+    'net': {
+        'whitening': {
+            'kernel_size': 2,
+        },
+        'pad_amount': 2,
+        'cutout_size': 0,
+        'batch_norm_momentum': .4, # * Don't forget momentum is 1 - momentum here (due to a quirk in the original paper... >:( )
+        'base_depth': 64 ## This should be a factor of 8 in some way to stay tensor core friendly
+    },
+    'misc': {
+        'ema': {
+            'start_epochs': 2,
+            'decay_base': .95,
+            'decay_pow': 3.,
+            'every_n_steps': 5,
+        },
+        'train_epochs': 11.5,
+    }
+}
+
+#############################################
+#                DataLoader                 #
 #############################################
 
 ## https://github.com/KellerJordan/cifar10-loader/blob/master/quick_cifar/loader.py
@@ -95,77 +166,6 @@ class PrepadCifarLoader:
         for i in range(len(self)):
             idxs = indices[i*self.batch_size:(i+1)*self.batch_size]
             yield (images[idxs], self.labels[idxs])
-
-#############################################
-#            Setup/Hyperparameters          #
-#############################################
-
-import sys
-import uuid
-import numpy as np
-
-from functools import partial
-import math
-import os
-import copy
-
-import torch
-from torch import nn
-import torch.nn.functional as F
-
-## <-- teaching comments
-# <-- functional comments
-# You can run 'sed -i.bak '/\#\#/d' ./main.py' to remove the teaching comments if they are in the way of your work. <3
-
-# This can go either way in terms of actually being helpful when it comes to execution speed.
-#torch.backends.cudnn.benchmark = True
-
-# This code was built from the ground up to be directly hackable and to support rapid experimentation, which is something you might see
-# reflected in what would otherwise seem to be odd design decisions. It also means that maybe some cleaning up is required before moving
-# to production if you're going to use this code as such (such as breaking different section into unique files, etc). That said, if there's
-# ways this code could be improved and cleaned up, please do open a PR on the GitHub repo. Your support and help is much appreciated for this
-# project! :)
-
-
-# This is for testing that certain changes don't exceed some X% portion of the reference GPU (here an A100)
-# so we can help reduce a possibility that future releases don't take away the accessibility of this codebase.
-#torch.cuda.set_per_process_memory_fraction(fraction=6.5/40., device=0) ## 40. GB is the maximum memory of the base A100 GPU
-
-# set global defaults (in this particular file) for convolutions
-default_conv_kwargs = {'kernel_size': 3, 'padding': 'same', 'bias': False}
-
-batchsize = 1024
-bias_scaler = 64
-# To replicate the ~95.79%-accuracy-in-110-seconds runs, you can change the base_depth from 64->128, train_epochs from 12.1->90, ['ema'] epochs 10->80, cutmix_size 3->10, and cutmix_epochs 6->80
-hyp = {
-    'opt': {
-        'bias_lr':        1.525 * bias_scaler / 1024,
-        'non_bias_lr':    1.525 / 1024,
-        'bias_decay':     2 * 6.687e-4 * batchsize/bias_scaler,
-        'non_bias_decay': 2 * 6.687e-4 * batchsize,
-        'scaling_factor': 1./9,
-        'percent_start': .23,
-        'loss_scale': 32,
-    },
-    'net': {
-        'whitening': {
-            'kernel_size': 2,
-        },
-        'pad_amount': 2,
-        'cutout_size': 0,
-        'batch_norm_momentum': .4, # * Don't forget momentum is 1 - momentum here (due to a quirk in the original paper... >:( )
-        'base_depth': 64 ## This should be a factor of 8 in some way to stay tensor core friendly
-    },
-    'misc': {
-        'ema': {
-            'start_epochs': 2,
-            'decay_base': .95,
-            'decay_pow': 3.,
-            'every_n_steps': 5,
-        },
-        'train_epochs': 11.5,
-    }
-}
 
 #############################################
 #            Network Components             #
