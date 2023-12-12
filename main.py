@@ -1,6 +1,8 @@
 #############################################
 #            Standalone DataLoader          #
 #############################################
+
+## https://github.com/KellerJordan/cifar10-loader/blob/master/quick_cifar/loader.py
 import os
 from math import ceil
 import torch
@@ -97,6 +99,7 @@ class PrepadCifarLoader:
 #############################################
 #            Setup/Hyperparameters          #
 #############################################
+
 import sys
 import uuid
 import numpy as np
@@ -414,8 +417,6 @@ def print_training_details(columns_list, separator_left='|  ', separator_right='
     if is_final_entry:
         print('-'*(len(print_string))) # print the final output bar
 
-print_training_details(logging_columns_list, column_heads_only=True) ## print out the training column heads before we print the actual content for each run.
-
 ########################################
 #           Train and Eval             #
 ########################################
@@ -535,7 +536,8 @@ def main():
 
         # Print out our training details (sorry for the complexity, the whole logging business here is a bit of a hot mess once the columns need to be aligned and such....)
         ## We also check to see if we're in our final epoch so we can print the 'bottom' of the table for each round.
-        print_training_details(list(map(partial(format_for_table, locals=locals()), logging_columns_list)), is_final_entry=(epoch >= math.ceil(hyp['misc']['train_epochs'] - 1)))
+        print_training_details(list(map(partial(format_for_table, locals=locals()), logging_columns_list)),
+                               is_final_entry=(epoch >= math.ceil(hyp['misc']['train_epochs'] - 1)))
 
 
     return ema_val_acc # Return the final ema accuracy achieved (not using the 'best accuracy' selection strategy, which I think is okay here....)
@@ -545,6 +547,7 @@ if __name__ == "__main__":
     with open(sys.argv[0]) as f:
         code = f.read()
 
+    print_training_details(logging_columns_list, column_heads_only=True) ## print out the training column heads before we print the actual content for each run.
     acc_list = []
     for run_num in range(25):
         acc_list.append(torch.tensor(main()))
