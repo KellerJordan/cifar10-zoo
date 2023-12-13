@@ -472,7 +472,7 @@ def main():
         starter.record()
         net.train()
 
-        for epoch_step, (inputs, labels) in enumerate(train_loader):
+        for inputs, labels in train_loader:
 
             outputs = net(inputs)
             loss = loss_fn(outputs, labels).sum()
