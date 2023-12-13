@@ -429,9 +429,17 @@ def main():
     train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=batchsize, aug=train_augs)
     test_loader = PrepadCifarLoader('/tmp/cifar10', train=False, batch_size=2500)
 
+    ## For accurately timing GPU code
+    starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+    torch.cuda.synchronize() ## clean up any pre-net setup operations
+
     # Get network
+    starter.record()
     train_images = train_loader.normalize(train_loader.images)
     net = make_net(train_images)
+    ender.record()
+    torch.cuda.synchronize()
+    total_time_seconds += 1e-3 * starter.elapsed_time(ender)
 
     # Loss function is smoothed cross-entropy
     loss_fn = nn.CrossEntropyLoss(label_smoothing=0.2, reduction='none')
@@ -454,10 +462,6 @@ def main():
     ## to somewhat accomodate for whatever the expected information intake rate is. The tradeoff I believe, though, is that this is to some degree noisier as we
     ## are intaking fewer samples of our distribution-over-time, with a higher individual weight each. This can be good or bad depending upon what we want.
     projected_ema_decay_val  = hyp['misc']['ema']['decay_base'] ** hyp['misc']['ema']['every_n_steps']
-
-    ## For accurately timing GPU code
-    starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
-    torch.cuda.synchronize() ## clean up any pre-net setup operations
 
     for epoch in range(math.ceil(hyp['misc']['train_epochs'])):
 
