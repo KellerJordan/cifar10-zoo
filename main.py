@@ -33,6 +33,8 @@ torch.backends.cudnn.benchmark = True
 # so we can help reduce a possibility that future releases don't take away the accessibility of this codebase.
 #torch.cuda.set_per_process_memory_fraction(fraction=6.5/40., device=0) ## 40. GB is the maximum memory of the base A100 GPU
 
+## These hyperparameters yield a mean accuracy between 94.03% and 94.06% (based on n=400 runs).
+
 # set global defaults (in this particular file) for convolutions
 default_conv_kwargs = {'kernel_size': 3, 'padding': 'same', 'bias': False}
 
