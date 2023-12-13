@@ -432,7 +432,6 @@ def main():
 
     ## For accurately timing GPU code
     starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
-    torch.cuda.synchronize() ## clean up any pre-net setup operations
 
     # Get network
     net = make_net()
@@ -472,7 +471,6 @@ def main():
         # Training Mode #
         #################
 
-        torch.cuda.synchronize()
         starter.record()
         net.train()
 
@@ -558,7 +556,6 @@ def main():
 
         assert net_ema
 
-        torch.cuda.synchronize()
         starter.record()
 
         pad = 1
