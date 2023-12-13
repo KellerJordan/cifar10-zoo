@@ -20,7 +20,7 @@ import torch.nn.functional as F
 # You can run 'sed -i.bak '/\#\#/d' ./main.py' to remove the teaching comments if they are in the way of your work. <3
 
 # This can go either way in terms of actually being helpful when it comes to execution speed.
-#torch.backends.cudnn.benchmark = True
+torch.backends.cudnn.benchmark = True
 
 # This code was built from the ground up to be directly hackable and to support rapid experimentation, which is something you might see
 # reflected in what would otherwise seem to be odd design decisions. It also means that maybe some cleaning up is required before moving
@@ -453,8 +453,6 @@ def main():
                             [0, 1, final_lr_ratio]) 
     lr_sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_schedule.__getitem__)
 
-    ema_epoch_start = hyp['misc']['ema']['start_epochs']
-
     ## I believe this wasn't logged, but the EMA update power is adjusted by being raised to the power of the number of "every n" steps
     ## to somewhat accomodate for whatever the expected information intake rate is. The tradeoff I believe, though, is that this is to some degree noisier as we
     ## are intaking fewer samples of our distribution-over-time, with a higher individual weight each. This can be good or bad depending upon what we want.
@@ -487,7 +485,7 @@ def main():
 
             current_steps += 1
 
-            if epoch >= ema_epoch_start and current_steps % hyp['misc']['ema']['every_n_steps'] == 0:          
+            if epoch >= hyp['misc']['ema']['start_epochs'] and current_steps % hyp['misc']['ema']['every_n_steps'] == 0:          
                 ## Initialize the ema from the network at this point in time if it does not already exist.... :D
                 if net_ema is None: # don't snapshot the network yet if so!
                     net_ema = NetworkEMA(net)
