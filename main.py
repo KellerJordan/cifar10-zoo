@@ -304,7 +304,7 @@ class SpeedyConvNet(nn.Module):
         x = self.net_dict['linear'](x)
         return x
 
-def make_net(train_images):
+def make_net():
     whiten_conv_depth = 2 * 3 * hyp['net']['whitening']['kernel_size']**2
     network_dict = nn.ModuleDict({
         'initial_block': nn.ModuleDict({
@@ -323,6 +323,9 @@ def make_net(train_images):
     net = net.to(memory_format=torch.channels_last) # to appropriately use tensor cores/avoid thrash while training
     net.train()
     net.half() # Convert network to half before initializing the initial whitening layer.
+    return net
+
+def init_net(net, train_images):
 
     with torch.no_grad():
         init_whitening_conv(net.net_dict['initial_block']['whiten'],
@@ -354,8 +357,6 @@ def make_net(train_images):
                 ## region of the GeLU activation function at network initialization. I am not currently
                 ## sure about this, however, it will require some more investigation. For now -- it works! D:
                 torch.nn.init.dirac_(block.conv2.weight)
-
-    return net
 
 ########################################
 #          Training Helpers            #
@@ -434,9 +435,11 @@ def main():
     torch.cuda.synchronize() ## clean up any pre-net setup operations
 
     # Get network
+    net = make_net()
+
     starter.record()
     train_images = train_loader.normalize(train_loader.images)
-    net = make_net(train_images)
+    init_net(net, train_images)
     ender.record()
     torch.cuda.synchronize()
     total_time_seconds += 1e-3 * starter.elapsed_time(ender)
