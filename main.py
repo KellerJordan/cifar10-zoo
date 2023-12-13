@@ -450,7 +450,7 @@ def main():
     final_lr_ratio = .07 # Actually pretty important, apparently!
     lr_schedule = np.interp(np.arange(1+total_train_steps),
                             [0, int(pct_start * total_train_steps), total_train_steps],
-                            [0, 1, final_lr_ratio]) 
+                            [0.2, 1, final_lr_ratio]) 
     lr_sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_schedule.__getitem__)
 
     ## I believe this wasn't logged, but the EMA update power is adjusted by being raised to the power of the number of "every n" steps
