@@ -428,7 +428,7 @@ def main():
 
     train_augs = dict(flip=True, translate=hyp['net']['pad_amount'], cutout=hyp['net']['cutout_size'])
     train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=batchsize, aug=train_augs)
-    test_loader = PrepadCifarLoader('/tmp/cifar10', train=False, batch_size=2500)
+    test_loader = PrepadCifarLoader('/tmp/cifar10', train=False, batch_size=2000)
 
     ## For accurately timing GPU code
     starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
