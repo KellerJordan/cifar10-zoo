@@ -67,7 +67,7 @@ hyp = {
             'decay_pow': 3.,
             'every_n_steps': 5,
         },
-        'train_epochs': 11.5,
+        'train_epochs': 10.0,
     }
 }
 
@@ -144,7 +144,7 @@ class PrepadCifarLoader:
 
         # Pre-pad images to save time when doing random translation
         pad = self.aug.get('translate', 0)
-        self.prepad_images = F.pad(self.images, (pad,)*4, 'reflect')
+        self.padded_images = F.pad(self.images, (pad,)*4, 'reflect') if pad > 0 else None
 
         self.batch_size = batch_size
         self.drop_last = train if drop_last is None else drop_last
@@ -152,7 +152,8 @@ class PrepadCifarLoader:
 
     def augment_prepad(self, images):
         images = self.normalize(images)
-        images = batch_crop(images, self.images.shape[-2])
+        if self.aug.get('translate', 0) > 0:
+            images = batch_crop(images, self.images.shape[-2])
         if self.aug.get('flip', False):
             images = batch_flip_lr(images)
         if self.aug.get('cutout', 0) > 0:
@@ -163,7 +164,7 @@ class PrepadCifarLoader:
         return len(self.images)//self.batch_size if self.drop_last else ceil(len(self.images)/self.batch_size)
 
     def __iter__(self):
-        images = self.augment_prepad(self.prepad_images)
+        images = self.augment_prepad(self.padded_images if self.padded_images is not None else self.images)
         indices = (torch.randperm if self.shuffle else torch.arange)(len(images), device=images.device)
         for i in range(len(self)):
             idxs = indices[i*self.batch_size:(i+1)*self.batch_size]
@@ -294,8 +295,6 @@ class SpeedyConvNet(nn.Module):
 
     # This allows you to customize/change the execution order of the network as needed.
     def forward(self, x):
-        if not self.training:
-            x = torch.cat((x, torch.flip(x, (-1,))))
         x = self.net_dict['initial_block']['whiten'](x)
         x = self.net_dict['initial_block']['activation'](x)
         x = self.net_dict['conv_group_1'](x)
@@ -303,10 +302,6 @@ class SpeedyConvNet(nn.Module):
         x = self.net_dict['conv_group_3'](x)
         x = self.net_dict['pooling'](x)
         x = self.net_dict['linear'](x)
-        if not self.training:
-            # Average the predictions from the lr-flipped inputs during eval
-            orig, flipped = x.split(len(x)//2, dim=0)
-            x = .5 * orig + .5 * flipped
         return x
 
 def make_net(train_images):
@@ -400,7 +395,7 @@ def init_split_parameter_dictionaries(network):
                 hyp_nonbias['params'].append(p)
     return hyp_nonbias, hyp_bias
 
-logging_columns_list = ['epoch', 'train_loss', 'val_loss', 'train_acc', 'val_acc', 'ema_val_acc', 'total_time_seconds']
+logging_columns_list = ['epoch', 'train_loss', 'val_loss', 'train_acc', 'val_acc', 'ema_val_acc', 'tta_ema_val_acc', 'total_time_seconds']
 # define the printing function and print the column heads
 def print_training_details(columns_list, separator_left='|  ', separator_right='  ', final="|", column_heads_only=False, is_final_entry=False):
     print_string = ""
@@ -526,21 +521,71 @@ def main():
             if net_ema:
                 ema_val_acc = torch.stack(acc_list_ema).mean().item()
 
+        tta_ema_val_acc = None
+
         # We basically need to look up local variables by name so we can have the names, so we can pad to the proper column width.
         ## Printing stuff in the terminal can get tricky and this used to use an outside library, but some of the required stuff seemed even
         ## more heinous than this, unfortunately. So we switched to the "more simple" version of this!
         format_for_table = lambda x, locals: (f"{locals[x]}".rjust(len(x))) \
-                           if type(locals[x]) == int else "{:0.4f}".format(locals[x]).rjust(len(x)) \
+                           if type(locals[x]) in (int, str) else "{:0.4f}".format(locals[x]).rjust(len(x)) \
                            if locals[x] is not None \
                            else " "*len(x)
 
         # Print out our training details (sorry for the complexity, the whole logging business here is a bit of a hot mess once the columns need to be aligned and such....)
         ## We also check to see if we're in our final epoch so we can print the 'bottom' of the table for each round.
         print_training_details(list(map(partial(format_for_table, locals=locals()), logging_columns_list)),
-                               is_final_entry=(epoch >= math.ceil(hyp['misc']['train_epochs'] - 1)))
+                               is_final_entry=False)
 
+    ####################
+    #  TTA Evaluation  #
+    ####################
 
-    return ema_val_acc # Return the final ema accuracy achieved (not using the 'best accuracy' selection strategy, which I think is okay here....)
+    with torch.no_grad():
+
+        ## Test-time augmentation strategy:
+        ## 1. Flip (mirror) the image left-to-right (50% of the time).
+        ## 2. Then jitter the image by one pixel (50% of the time, i.e. both happen 25% of the time).
+        ##
+        ## This creates 8 inputs per image (left/right times the four directions),
+        ## which we evaluate and then weight according to the given probabilities.
+
+        assert net_ema
+
+        torch.cuda.synchronize()
+        starter.record()
+
+        pad = 1
+        padded_images = F.pad(test_loader.images, (pad,)*4, 'reflect')
+        images = [test_loader.images]
+        images.append(padded_images[:, :, 0:32, 0:32])
+        images.append(padded_images[:, :, 0:32, 2:34])
+        images.append(padded_images[:, :, 2:34, 0:32])
+        images.append(padded_images[:, :, 2:34, 2:34])
+        images_tta = test_loader.normalize(torch.cat(images))
+        labels = test_loader.labels
+
+        outputs_list = []
+        for inputs in images_tta.split(2000):
+            outputs = (0.5 * net_ema(inputs) + 0.5 * net_ema(inputs.flip(-1)))
+            outputs_list.append(outputs)
+        outputs = torch.cat(outputs_list)
+        outputs = outputs.view(-1, len(labels), 10)
+        
+        logits_mirror = outputs[0]
+        logits_mirror_jitter = outputs[1:].mean(0)
+        logits_tta = (0.5 * logits_mirror + 0.5 * logits_mirror_jitter)
+
+        tta_ema_val_acc = (logits_tta.argmax(1) == labels).float().mean().item()
+
+        ender.record()
+        torch.cuda.synchronize()
+        total_time_seconds += 1e-3 * starter.elapsed_time(ender)
+
+    epoch = 'eval'
+    print_training_details(list(map(partial(format_for_table, locals=locals()), logging_columns_list)),
+                           is_final_entry=True)
+
+    return tta_ema_val_acc
 
 
 if __name__ == "__main__":
