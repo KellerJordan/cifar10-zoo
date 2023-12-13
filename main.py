@@ -396,9 +396,7 @@ def init_split_parameter_dictionaries(network):
                 hyp_nonbias['params'].append(p)
     return hyp_nonbias, hyp_bias
 
-logging_columns_list = ['epoch', 'train_loss', 'val_loss', 'train_acc', 'val_acc', 'ema_val_acc', 'tta_ema_val_acc', 'total_time_seconds']
-# define the printing function and print the column heads
-def print_training_details(columns_list, separator_left='|  ', separator_right='  ', final="|", column_heads_only=False, is_final_entry=False):
+def print_columns(columns_list, separator_left='|  ', separator_right='  ', final="|", column_heads_only=False, is_final_entry=False):
     print_string = ""
     if column_heads_only:
         for column_head_name in columns_list:
@@ -414,6 +412,18 @@ def print_training_details(columns_list, separator_left='|  ', separator_right='
         print(print_string)
     if is_final_entry:
         print('-'*(len(print_string))) # print the final output bar
+
+logging_columns_list = ['epoch', 'train_loss', 'val_loss', 'train_acc', 'val_acc', 'ema_val_acc', 'tta_ema_val_acc', 'total_time_seconds']
+def print_training_details(variables, is_final_entry):
+    # We basically need to look up local variables by name so we can have the names, so we can pad to the proper column width.
+    ## Printing stuff in the terminal can get tricky and this used to use an outside library, but some of the required stuff seemed even
+    ## more heinous than this, unfortunately. So we switched to the "more simple" version of this!
+    format_for_table = lambda x, variables: (f"{variables[x]}".rjust(len(x))) \
+                       if type(variables[x]) in (int, str) else "{:0.4f}".format(variables[x]).rjust(len(x)) \
+                       if variables[x] is not None \
+                       else " "*len(x)
+    print_columns(list(map(partial(format_for_table, variables=variables), logging_columns_list)),
+                           is_final_entry=is_final_entry)
 
 ########################################
 #           Train and Eval             #
@@ -525,21 +535,9 @@ def main():
             ema_val_acc = None
             if net_ema:
                 ema_val_acc = torch.stack(acc_list_ema).mean().item()
-
         tta_ema_val_acc = None
 
-        # We basically need to look up local variables by name so we can have the names, so we can pad to the proper column width.
-        ## Printing stuff in the terminal can get tricky and this used to use an outside library, but some of the required stuff seemed even
-        ## more heinous than this, unfortunately. So we switched to the "more simple" version of this!
-        format_for_table = lambda x, locals: (f"{locals[x]}".rjust(len(x))) \
-                           if type(locals[x]) in (int, str) else "{:0.4f}".format(locals[x]).rjust(len(x)) \
-                           if locals[x] is not None \
-                           else " "*len(x)
-
-        # Print out our training details (sorry for the complexity, the whole logging business here is a bit of a hot mess once the columns need to be aligned and such....)
-        ## We also check to see if we're in our final epoch so we can print the 'bottom' of the table for each round.
-        print_training_details(list(map(partial(format_for_table, locals=locals()), logging_columns_list)),
-                               is_final_entry=False)
+        print_training_details(locals(), is_final_entry=False)
 
     ####################
     #  TTA Evaluation  #
@@ -586,8 +584,7 @@ def main():
         total_time_seconds += 1e-3 * starter.elapsed_time(ender)
 
     epoch = 'eval'
-    print_training_details(list(map(partial(format_for_table, locals=locals()), logging_columns_list)),
-                           is_final_entry=True)
+    print_training_details(locals(), is_final_entry=True)
 
     return tta_ema_val_acc
 
@@ -596,7 +593,7 @@ if __name__ == "__main__":
     with open(sys.argv[0]) as f:
         code = f.read()
 
-    print_training_details(logging_columns_list, column_heads_only=True) ## print out the training column heads before we print the actual content for each run.
+    print_columns(logging_columns_list, column_heads_only=True)
     acc_list = []
     for run_num in range(25):
         acc_list.append(torch.tensor(main()))
