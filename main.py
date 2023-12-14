@@ -212,7 +212,7 @@ class ConvGroup(nn.Module):
         self.channels_in  = channels_in
         self.channels_out = channels_out
 
-        self.pool1 = nn.MaxPool2d(2)
+        self.pool = nn.MaxPool2d(2)
         self.conv1 = Conv(channels_in,  channels_out)
         self.conv2 = Conv(channels_out, channels_out)
 
@@ -224,7 +224,7 @@ class ConvGroup(nn.Module):
 
     def forward(self, x):
         x = self.conv1(x)
-        x = self.pool1(x)
+        x = self.pool(x)
         x = self.norm1(x)
         x = self.activ(x)
         x = self.conv2(x)
