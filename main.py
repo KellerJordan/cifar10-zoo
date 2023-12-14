@@ -33,7 +33,7 @@ torch.backends.cudnn.benchmark = True
 # so we can help reduce a possibility that future releases don't take away the accessibility of this codebase.
 #torch.cuda.set_per_process_memory_fraction(fraction=6.5/40., device=0) ## 40. GB is the maximum memory of the base A100 GPU
 
-## These hyperparameters yield a mean accuracy between 94.03% and 94.06% (based on n=400 runs).
+## These hyperparameters yield a mean accuracy between 94.004% and 94.030% (based on n=400 runs).
 
 # set global defaults (in this particular file) for convolutions
 default_conv_kwargs = {'kernel_size': 3, 'padding': 'same', 'bias': False}
@@ -266,7 +266,7 @@ def get_whitening_parameters(patches):
 
 # Run this over the training set to calculate the patch statistics, then set the initial convolution as a non-learnable 'whitening' layer
 # Note that this is a large epsilon, so the bottom half of principal directions won't fully whiten
-def init_whitening_conv(layer, train_set, eps=1e-2):
+def init_whitening_conv(layer, train_set, eps=5e-4):
     patches = get_patches(train_set, patch_shape=layer.weight.data.shape[2:])
     eigenvalues, eigenvectors = get_whitening_parameters(patches)
     eigenvectors_scaled = eigenvectors/torch.sqrt(eigenvalues+eps) # set the filters as the eigenvectors in order to whiten inputs
@@ -287,6 +287,7 @@ depths = {
     'block3': round(scaler**3 * hyp['net']['base_depth']), # 512 w/ scaler at base value
     'num_classes': 10
 }
+depths = {'block1': 64, 'block2': 256, 'block3': 448, 'num_classes': 10}
 
 class SpeedyConvNet(nn.Module):
     def __init__(self, network_dict):
