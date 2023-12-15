@@ -280,14 +280,12 @@ def init_whitening_conv(layer, train_set, eps=5e-4):
 #            Network Definition             #
 #############################################
 
-scaler = 2. ## You can play with this on your own if you want, for the first beta I wanted to keep things simple (for now) and leave it out of the hyperparams dict
 depths = {
-    'block1': round(scaler**0 * hyp['net']['base_depth']), # 64  w/ scaler at base value
-    'block2': round(scaler**2 * hyp['net']['base_depth']), # 256 w/ scaler at base value
-    'block3': round(scaler**3 * hyp['net']['base_depth']), # 512 w/ scaler at base value
+    'block1': round(1 * hyp['net']['base_depth']), # 64  w/ scaler at base value
+    'block2': round(4 * hyp['net']['base_depth']), # 256 w/ scaler at base value
+    'block3': round(7 * hyp['net']['base_depth']), # 448 w/ scaler at base value
     'num_classes': 10
 }
-depths = {'block1': 64, 'block2': 256, 'block3': 448, 'num_classes': 10}
 
 class SpeedyConvNet(nn.Module):
     def __init__(self, network_dict):
