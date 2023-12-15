@@ -531,7 +531,7 @@ label_smoothing_loss = lambda alpha: Network({
 ## Misc
 #####################
 
-lr_schedule = lambda knots, vals, batch_size: PiecewiseLinear(np.array(knots)*len(train_batches(batch_size)), np.array(vals)/batch_size)
+lr_schedule = lambda knots, vals, batch_size: PiecewiseLinear(np.array(knots)*len(train_loader), np.array(vals)/batch_size)
 
 def cov(X):
     X = X/np.sqrt(X.size(0) - 1)
@@ -582,12 +582,11 @@ valid_steps_tta = (forward_tta([identity, flip_lr]), log_activations(('loss', 'a
 
 
 epochs, batch_size, ema_epochs=10, 512, 2
-transforms = (Crop(32, 32), FlipLR())
 opt_params = {'lr': lr_schedule([0, epochs/5, epochs - ema_epochs], [0.0, 1.0, 0.1], batch_size), 'weight_decay': Const(5e-4*batch_size), 'momentum': Const(0.9)}
 opt_params_bias = {'lr': lr_schedule([0, epochs/5, epochs - ema_epochs], [0.0, 1.0*64, 0.1*64], batch_size), 'weight_decay': Const(5e-4*batch_size/64), 'momentum': Const(0.9)}
 
 logs = Table(report=every(epochs,'epoch'))
-for run in range(10):
+for run in range(3):
     model = build_model(input_whitening_net, label_smoothing_loss(0.2))
     is_bias = group_by_key(('bias' in k, v) for k, v in trainable_params(model).items())
     state, timer = {MODEL: model, VALID_MODEL: copy.deepcopy(model), OPTS: [SGD(is_bias[False], opt_params), SGD(is_bias[True], opt_params_bias)]}, Timer(torch.cuda.synchronize)
@@ -598,6 +597,9 @@ for run in range(10):
                                                                         valid_steps=valid_steps_tta)))
 print(summary(logs))
 
+
+train_aug = dict(flip=True, translate=4, cutout=12)
+train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=512, aug=train_aug)
 
 x_ent_loss = Network({
   'loss':  (nn.CrossEntropyLoss, {'reduction': 'none'}, ['logits', 'target']),
@@ -619,7 +621,6 @@ def train_epoch_tta(state, timer, train_batches, valid_batches, train_steps=trai
     }
 
 #baseline model
-transforms = (Crop(32, 32), FlipLR(), Cutout(12, 12))
 logs = Table()
 for run in tqdm(range(0)):
     for epochs in [24, 40, 60, 80]:
@@ -628,10 +629,12 @@ for run in tqdm(range(0)):
         model = build_model(network(), x_ent_loss)
         state, timer = {MODEL: model, OPTS: [SGD(trainable_params(model).values(), opt_params)]}, Timer(torch.cuda.synchronize)
         for epoch in range(epochs-1):
-            train_epoch(state, timer, train_batches(batch_size, transforms),  valid_batches(batch_size)) 
+            train_batches2 = [{'input': inputs.half(), 'target': labels} for (inputs, labels) in train_loader]
+            train_epoch(state, timer, train_batches2, test_batches2)
+        train_batches2 = [{'input': inputs.half(), 'target': labels} for (inputs, labels) in train_loader]
         logs.append(union({'run': run+1, 'epoch': epochs, 'experiment': 'baseline'}, 
-                          train_epoch_tta(state, timer, train_batches(batch_size, transforms),  valid_batches(batch_size), 
-                                          valid_steps_tta=valid_steps_tta)))   
+                          train_epoch_tta(state, timer, train_batches2, test_batches2,
+                                          valid_steps_tta=valid_steps_tta)))
 #final model
 ema_epochs=2
 for run in tqdm(range(3)):
@@ -644,11 +647,12 @@ for run in tqdm(range(3)):
         is_bias = group_by_key(('bias' in k, v) for k, v in trainable_params(model).items())
         state, timer = {MODEL: model, VALID_MODEL: copy.deepcopy(model), OPTS: [SGD(is_bias[False], opt_params), SGD(is_bias[True], opt_params_bias)]}, Timer(torch.cuda.synchronize)
         for epoch in range(epochs-1):
-            train_epoch(state, timer, train_batches(batch_size, transforms), valid_batches(batch_size), 
-                                                                            train_steps=(*train_steps, update_ema(momentum=0.99, update_freq=5)))
+            train_batches2 = [{'input': inputs.half(), 'target': labels} for (inputs, labels) in train_loader]
+            train_epoch(state, timer, train_batches2, test_batches2, train_steps=(*train_steps, update_ema(momentum=0.99, update_freq=5)))
+        train_batches2 = [{'input': inputs.half(), 'target': labels} for (inputs, labels) in train_loader]
         logs.append(union({'run': run+1, 'epoch': epochs, 'experiment': 'final'}, 
-                          train_epoch_tta(state, timer, train_batches(batch_size, transforms), valid_batches(batch_size), 
-                                          train_steps=(*train_steps, update_ema(momentum=0.99, update_freq=5)))))  
+                          train_epoch_tta(state, timer, train_batches2, test_batches2,
+                                          train_steps=(*train_steps, update_ema(momentum=0.99, update_freq=5)))))
         
 data = logs.df()
 print(data)
