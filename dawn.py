@@ -1,3 +1,102 @@
+#############################################
+#                DataLoader                 #
+#############################################
+
+## https://github.com/KellerJordan/cifar10-loader/blob/master/quick_cifar/loader.py
+import os
+from math import ceil
+import torch
+import torch.nn.functional as F
+import torchvision
+import torchvision.transforms as T
+
+CIFAR_MEAN = torch.tensor((0.4914, 0.4822, 0.4465))
+CIFAR_STD = torch.tensor((0.2470, 0.2435, 0.2616))
+
+def make_random_square_masks(inputs, size):
+    is_even = int(size % 2 == 0)
+    n,c,h,w = inputs.shape
+
+    # seed top-left corners of squares to cutout boxes from, in one dimension each
+    corner_y = torch.randint(0, h-size+1, size=(n,), device=inputs.device)
+    corner_x = torch.randint(0, w-size+1, size=(n,), device=inputs.device)
+
+    # measure distance, using the center as a reference point
+    corner_y_dists = torch.arange(h, device=inputs.device).view(1, 1, h, 1) - corner_y.view(-1, 1, 1, 1)
+    corner_x_dists = torch.arange(w, device=inputs.device).view(1, 1, 1, w) - corner_x.view(-1, 1, 1, 1)
+    
+    mask_y = (corner_y_dists >= 0) * (corner_y_dists < size)
+    mask_x = (corner_x_dists >= 0) * (corner_x_dists < size)
+
+    final_mask = mask_y * mask_x
+
+    return final_mask
+
+def batch_flip_lr(inputs):
+    flip_mask = (torch.rand(len(inputs), device=inputs.device) < 0.5).view(-1, 1, 1, 1)
+    return torch.where(flip_mask, inputs.flip(-1), inputs)
+
+def batch_crop(inputs, crop_size):
+    crop_mask = make_random_square_masks(inputs, crop_size)
+    cropped_batch = torch.masked_select(inputs, crop_mask)
+    return cropped_batch.view(inputs.shape[0], inputs.shape[1], crop_size, crop_size)
+
+def batch_cutout(inputs, size):
+    cutout_masks = make_random_square_masks(inputs, size)
+    return inputs.masked_fill(cutout_masks, 0)
+
+## This is a pre-padded variant of quick_cifar.CifarLoader which moves the padding step of random translate
+## from __iter__ to __init__, so that it doesn't need to be repeated each epoch.
+class PrepadCifarLoader:
+
+    def __init__(self, path, train=True, batch_size=500, aug=None, drop_last=None, shuffle=None, gpu=0):
+        data_path = os.path.join(path, 'train.pt' if train else 'test.pt')
+        if not os.path.exists(data_path):
+            dset = torchvision.datasets.CIFAR10(path, download=True, train=train)
+            images = torch.tensor(dset.data)
+            labels = torch.tensor(dset.targets)
+            torch.save({'images': images, 'labels': labels, 'classes': dset.classes}, data_path)
+
+        data = torch.load(data_path, map_location=torch.device(gpu))
+        self.images, self.labels, self.classes = data['images'], data['labels'], data['classes']
+        # It's faster to load+process uint8 data than to load preprocessed fp16 data
+        self.images = (self.images.half() / 255).permute(0, 3, 1, 2).to(memory_format=torch.channels_last)
+
+        self.normalize = T.Normalize(CIFAR_MEAN, CIFAR_STD)
+        self.denormalize = T.Normalize(-CIFAR_MEAN / CIFAR_STD, 1 / CIFAR_STD)
+        
+        self.aug = aug or {}
+        for k in self.aug.keys():
+            assert k in ['flip', 'translate', 'cutout'], 'Unrecognized key: %s' % k
+
+        # Pre-pad images to save time when doing random translation
+        pad = self.aug.get('translate', 0)
+        self.padded_images = F.pad(self.images, (pad,)*4, 'reflect') if pad > 0 else None
+
+        self.batch_size = batch_size
+        self.drop_last = train if drop_last is None else drop_last
+        self.shuffle = train if shuffle is None else shuffle
+
+    def augment_prepad(self, images):
+        images = self.normalize(images)
+        if self.aug.get('translate', 0) > 0:
+            images = batch_crop(images, self.images.shape[-2])
+        if self.aug.get('flip', False):
+            images = batch_flip_lr(images)
+        if self.aug.get('cutout', 0) > 0:
+            images = batch_cutout(images, self.aug['cutout'])
+        return images
+
+    def __len__(self):
+        return len(self.images)//self.batch_size if self.drop_last else ceil(len(self.images)/self.batch_size)
+
+    def __iter__(self):
+        images = self.augment_prepad(self.padded_images if self.padded_images is not None else self.images)
+        indices = (torch.randperm if self.shuffle else torch.arange)(len(images), device=images.device)
+        for i in range(len(self)):
+            idxs = indices[i*self.batch_size:(i+1)*self.batch_size]
+            yield (images[idxs], self.labels[idxs])
+
 ####################
 ## CORE
 #####################
@@ -41,7 +140,7 @@ reorder = lambda dct, keys: {k: dct[k] for k in keys}
 def identity(value): return value
 
 def build_graph(net, path_map='_'.join):
-    net = {path: node if len(node) is 3 else (*node, None) for path, node in path_iter(net)}
+    net = {path: node if len(node) == 3 else (*node, None) for path, node in path_iter(net)}
     default_inputs = chain([('input',)], net.keys())
     resolve_path = lambda path, pfx: pfx+path if (pfx+path in net or not pfx) else resolve_path(net, path, pfx[:-1])
     return {path_map(path): (typ, value, ([path_map(default)] if inputs is None else [path_map(resolve_path(make_tuple(k), path[:-1])) for k in inputs])) 
@@ -161,7 +260,6 @@ class LogSoftmax(namedtuple('LogSoftmax', ['dim'])):
     
 # node definitions   
 from inspect import signature    
-empty_signature = inspect.Signature()
 
 class node_def(namedtuple('node_def', ['type'])):
     def __call__(self, *args, **kwargs):
@@ -234,110 +332,6 @@ class Const(namedtuple('Const', ['val'])):
         return self.val
 
 #####################
-## DATA
-##################### 
-
-import torchvision
-from functools import lru_cache as cache
-
-@cache(None)
-def cifar10(root='./data'):
-    download = lambda train: torchvision.datasets.CIFAR10(root=root, train=train, download=True)
-    return {k: {'data': torch.tensor(v.data), 'targets': torch.tensor(v.targets)} 
-            for k,v in [('train', download(True)), ('valid', download(False))]}
-  
-cifar10_mean, cifar10_std = [
-    (125.31, 122.95, 113.87), # equals np.mean(cifar10()['train']['data'], axis=(0,1,2)) 
-    (62.99, 62.09, 66.70), # equals np.std(cifar10()['train']['data'], axis=(0,1,2))
-]
-cifar10_classes= 'airplane, automobile, bird, cat, deer, dog, frog, horse, ship, truck'.split(', ')
-
-#####################
-## data preprocessing
-#####################
-mean, std = [torch.tensor(x, device=device, dtype=torch.float16) for x in (cifar10_mean, cifar10_std)]
-
-normalise = lambda data, mean=mean, std=std: (data - mean)/std
-unnormalise = lambda data, mean=mean, std=std: data*std + mean
-pad = lambda data, border: nn.ReflectionPad2d(border)(data)
-transpose = lambda x, source='NHWC', target='NCHW': x.permute([source.index(d) for d in target]) 
-to = lambda *args, **kwargs: (lambda x: x.to(*args, **kwargs))
-
-def preprocess(dataset, transforms):
-    dataset = copy.copy(dataset)
-    for transform in reversed(transforms):
-        dataset['data'] = transform(dataset['data'])
-    return dataset
-
-#####################
-## Data augmentation
-#####################
-
-chunks = lambda data, splits: (data[start:end] for (start, end) in zip(splits, splits[1:]))
-
-even_splits = lambda N, num_chunks: np.cumsum([0] + [(N//num_chunks)+1]*(N % num_chunks)  + [N//num_chunks]*(num_chunks - (N % num_chunks)))
-
-def shuffled(xs, inplace=False):
-    xs = xs if inplace else copy.copy(xs) 
-    np.random.shuffle(xs)
-    return xs
-
-def transformed(data, targets, transform, max_options=None, unshuffle=False):
-    i = torch.randperm(len(data), device=device)
-    data = data[i]
-    options = shuffled(transform.options(data.shape), inplace=True)[:max_options]
-    data = torch.cat([transform.apply(x, **choice) for choice, x in zip(options, chunks(data, even_splits(len(data), len(options))))])
-    return (data[torch.argsort(i)], targets) if unshuffle else (data, targets[i])
-
-class Batches():
-    def __init__(self, batch_size, transforms=(), dataset=None, shuffle=True, drop_last=False, max_options=None):
-        self.dataset, self.transforms, self.shuffle, self.max_options = dataset, transforms, shuffle, max_options
-        N = len(dataset['data'])
-        self.splits = list(range(0, N+1, batch_size))
-        if not drop_last and self.splits[-1] != N:
-            self.splits.append(N)
-     
-    def __iter__(self):
-        data, targets = self.dataset['data'], self.dataset['targets']
-        for transform in self.transforms:
-            data, targets = transformed(data, targets, transform, max_options=self.max_options, unshuffle=not self.shuffle)
-        if self.shuffle:
-            i = torch.randperm(len(data), device=device)
-            data, targets = data[i], targets[i]
-        return ({'input': x.clone(), 'target': y} for (x, y) in zip(chunks(data, self.splits), chunks(targets, self.splits)))
-    
-    def __len__(self): 
-        return len(self.splits) - 1
-    
-#####################
-## Augmentations
-#####################
-
-class Crop(namedtuple('Crop', ('h', 'w'))):
-    def apply(self, x, x0, y0):
-        return x[..., y0:y0+self.h, x0:x0+self.w] 
-
-    def options(self, shape):
-        *_, H, W = shape
-        return [{'x0': x0, 'y0': y0} for x0 in range(W+1-self.w) for y0 in range(H+1-self.h)]
-    
-class FlipLR(namedtuple('FlipLR', ())):
-    def apply(self, x, choice):
-        return flip_lr(x) if choice else x 
-        
-    def options(self, shape):
-        return [{'choice': b} for b in [True, False]]
-
-class Cutout(namedtuple('Cutout', ('h', 'w'))):
-    def apply(self, x, x0, y0):
-        x[..., y0:y0+self.h, x0:x0+self.w] = 0.0
-        return x
-
-    def options(self, shape):
-        *_, H, W = shape
-        return [{'x0': x0, 'y0': y0} for x0 in range(W+1-self.w) for y0 in range(H+1-self.h)]  
-
-#####################
 ## TRAINING
 #####################
 
@@ -376,7 +370,7 @@ class Table():
         self.log.append(data)
         data = {' '.join(p): v for p,v in path_iter(data)}
         self.keys = self.keys or data.keys()
-        if len(self.log) is 1:
+        if len(self.log) == 1:
             print(*(self.formatter(k, True) for k in self.keys))
         if self.report(data):
             print(*(self.formatter(data[k]) for k in self.keys))
@@ -567,7 +561,15 @@ def eigens(patches):
     Λ, V = torch.linalg.eigh(Σ, UPLO='U')
     return Λ.flip(0), V.t().reshape(c*h*w, c, h, w).flip(0)
 
-Λ, V = eigens(patches(train_set['data'][:10000,:,4:-4,4:-4])) #center crop to remove padding
+train_aug = dict(flip=True, translate=4)
+train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=512, aug=train_aug)
+test_loader = PrepadCifarLoader('/tmp/cifar10', train=False, batch_size=1000)
+
+test_batches2 = [{'input': inputs.half(), 'target': labels} for (inputs, labels) in test_loader]
+
+train_images = train_loader.normalize(train_loader.images)[:10000]
+
+Λ, V = eigens(patches(train_images)) #center crop to remove padding
 
 def whitening_block(c_in, c_out, Λ=None, V=None, eps=1e-2):
     filt = nn.Conv2d(3, 27, kernel_size=(3,3), padding=(1,1), bias=False)
@@ -597,12 +599,13 @@ opt_params = {'lr': lr_schedule([0, epochs/5, epochs - ema_epochs], [0.0, 1.0, 0
 opt_params_bias = {'lr': lr_schedule([0, epochs/5, epochs - ema_epochs], [0.0, 1.0*64, 0.1*64], batch_size), 'weight_decay': Const(5e-4*batch_size/64), 'momentum': Const(0.9)}
 
 logs = Table(report=every(epochs,'epoch'))
-for run in range(2):
+for run in range(10):
     model = build_model(input_whitening_net, label_smoothing_loss(0.2))
     is_bias = group_by_key(('bias' in k, v) for k, v in trainable_params(model).items())
     state, timer = {MODEL: model, VALID_MODEL: copy.deepcopy(model), OPTS: [SGD(is_bias[False], opt_params), SGD(is_bias[True], opt_params_bias)]}, Timer(torch.cuda.synchronize)
     for epoch in tqdm(range(epochs)):
-        logs.append(union({'run': run+1, 'epoch': epoch+1}, train_epoch(state, timer, train_batches(batch_size, transforms), valid_batches(batch_size), 
+        train_batches2 = [{'input': inputs.half(), 'target': labels} for (inputs, labels) in train_loader]
+        logs.append(union({'run': run+1, 'epoch': epoch+1}, train_epoch(state, timer, train_batches2, test_batches2, 
                                                                         train_steps=(*train_steps, update_ema(momentum=0.99, update_freq=5)),
                                                                         valid_steps=valid_steps_tta)))
 print(summary(logs))
