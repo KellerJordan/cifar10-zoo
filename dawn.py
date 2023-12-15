@@ -533,18 +533,6 @@ label_smoothing_loss = lambda alpha: Network({
 
 lr_schedule = lambda knots, vals, batch_size: PiecewiseLinear(np.array(knots)*len(train_batches(batch_size)), np.array(vals)/batch_size)
 
-#####################
-## timings
-#####################
-dataset = cifar10() #downloads dataset
-dataset = map_nested(to(device), dataset)
-train_set = preprocess(dataset['train'], [partial(pad, border=4), transpose, normalise, to(torch.float16)])
-valid_set = preprocess(dataset['valid'], [transpose, normalise, to(torch.float16)])
-map_nested(to(cpu), {'train': train_set, 'valid': valid_set})
-
-train_batches = partial(Batches, dataset=train_set, shuffle=True,  drop_last=True, max_options=200)
-valid_batches = partial(Batches, dataset=valid_set, shuffle=False, drop_last=False)
-
 def cov(X):
     X = X/np.sqrt(X.size(0) - 1)
     return X.t() @ X
