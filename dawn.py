@@ -51,6 +51,7 @@ def build_graph(net, path_map='_'.join):
 ## Layers
 ##################### 
 
+import pandas as pd
 import numpy as np
 import torch
 from torch import nn
@@ -542,15 +543,10 @@ lr_schedule = lambda knots, vals, batch_size: PiecewiseLinear(np.array(knots)*le
 ## timings
 #####################
 dataset = cifar10() #downloads dataset
-print('Starting timer')
-t = Timer(synch=torch.cuda.synchronize)
 dataset = map_nested(to(device), dataset)
-print(f'Transfer to GPU:\t{t():.3f}s')
 train_set = preprocess(dataset['train'], [partial(pad, border=4), transpose, normalise, to(torch.float16)])
 valid_set = preprocess(dataset['valid'], [transpose, normalise, to(torch.float16)])
-print(f'Data preprocessing:\t{t():.3f}s')
 map_nested(to(cpu), {'train': train_set, 'valid': valid_set})
-print(f'Transfer to CPU:\t{t():.3f}s')
 
 train_batches = partial(Batches, dataset=train_set, shuffle=True,  drop_last=True, max_options=200)
 valid_batches = partial(Batches, dataset=valid_set, shuffle=False, drop_last=False)
@@ -601,7 +597,7 @@ opt_params = {'lr': lr_schedule([0, epochs/5, epochs - ema_epochs], [0.0, 1.0, 0
 opt_params_bias = {'lr': lr_schedule([0, epochs/5, epochs - ema_epochs], [0.0, 1.0*64, 0.1*64], batch_size), 'weight_decay': Const(5e-4*batch_size/64), 'momentum': Const(0.9)}
 
 logs = Table(report=every(epochs,'epoch'))
-for run in range(3):
+for run in range(2):
     model = build_model(input_whitening_net, label_smoothing_loss(0.2))
     is_bias = group_by_key(('bias' in k, v) for k, v in trainable_params(model).items())
     state, timer = {MODEL: model, VALID_MODEL: copy.deepcopy(model), OPTS: [SGD(is_bias[False], opt_params), SGD(is_bias[True], opt_params_bias)]}, Timer(torch.cuda.synchronize)
@@ -634,7 +630,7 @@ def train_epoch_tta(state, timer, train_batches, valid_batches, train_steps=trai
 #baseline model
 transforms = (Crop(32, 32), FlipLR(), Cutout(12, 12))
 logs = Table()
-for run in tqdm(range(1)):
+for run in tqdm(range(0)):
     for epochs in [24, 40, 60, 80]:
         opt_params = {'lr': lr_schedule([0, 5, epochs], [0.0, 0.4, 0.0], batch_size), 'weight_decay': Const(5e-4*batch_size), 'momentum': Const(0.9)}
 
@@ -647,7 +643,7 @@ for run in tqdm(range(1)):
                                           valid_steps_tta=valid_steps_tta)))   
 #final model
 ema_epochs=2
-for run in tqdm(range(1)):
+for run in tqdm(range(3)):
     for epochs in [24, 40, 60, 80]:
         opt_params = {'lr': lr_schedule([0, epochs/5, epochs - ema_epochs], [0.0, 0.4, 0.04], batch_size), 'weight_decay': Const(5e-4*batch_size), 'momentum': Const(0.9)}
         opt_params_bias = {'lr': lr_schedule([0, epochs/5, epochs - ema_epochs], [0.0, 0.4*64, 0.04
@@ -665,5 +661,4 @@ for run in tqdm(range(1)):
         
 data = logs.df()
 print(data)
-
 
