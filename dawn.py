@@ -118,6 +118,8 @@ def path_iter(nested_dict, pfx=()):
         if isinstance(val, dict): yield from path_iter(val, pfx+make_tuple(name))
         else: yield (pfx+make_tuple(name), val)  
             
+map_values = lambda func, dct: {k: func(v) for k,v in dct.items()}
+
 def map_nested(func, nested_dict):
     return {k: map_nested(func, v) if isinstance(v, dict) else func(v) for k,v in nested_dict.items()}
 
@@ -155,14 +157,11 @@ from collections import namedtuple
 import copy
 
 torch.backends.cudnn.benchmark = True
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-cpu = torch.device('cpu')
-    
+
 class Network(nn.Module):
-    def __init__(self, net, loss=None):
+    def __init__(self, net):
         super().__init__()
         self.graph = {path: (typ, typ(**params), inputs) for path, (typ, params, inputs) in build_graph(net).items()}
-        self.loss = loss or identity
         for path, (_,node,_) in self.graph.items(): 
             setattr(self, path, node)
     
@@ -180,8 +179,6 @@ class Network(nn.Module):
             if isinstance(node, nn.Module) and not isinstance(node, nn.BatchNorm2d):
                 node.half()
         return self
-
-build_model = lambda network, loss: Network(network, loss).half().to(device)
     
 class Add(namedtuple('Add', [])):
     def __call__(self, x, y): return x + y 
@@ -377,7 +374,8 @@ residual = lambda c, conv_block: {
     'add': (Add, {}, ['in', 'out']),
 }
 
-def build_network(channels, extra_layers, res_layers, scale, conv_block=conv_block, 
+channels={'prep': 64, 'layer1': 128, 'layer2': 256, 'layer3': 512}
+def build_network(channels=channels, res_layers=('layer1', 'layer3'), scale=1/8, conv_block=conv_block, 
                   prep_block=conv_block, conv_pool_block=conv_pool_block, types=None): 
     net = {
         'prep': prep_block(3, channels['prep']),
@@ -393,14 +391,9 @@ def build_network(channels, extra_layers, res_layers, scale, conv_block=conv_blo
         'logits': (Identity, {}),
     }
     for layer in res_layers:
-        net[layer]['residual'] = residual(channels[layer], conv_block)
-    for layer in extra_layers:
-        net[layer]['extra'] = conv_block(channels[layer], channels[layer])     
+        net[layer]['residual'] = residual(channels[layer], conv_block)    
     if types: net = map_types(types, net)
     return net
-
-channels={'prep': 64, 'layer1': 128, 'layer2': 256, 'layer3': 512}
-network = partial(build_network, channels=channels, extra_layers=(), res_layers=('layer1', 'layer3'), scale=1/8)   
 
 label_smoothing_loss = lambda alpha: Network({
         'logprobs': (LogSoftmax, {'dim': 1}, ['logits']),
@@ -450,7 +443,7 @@ def whitening_block(c_in, c_out, Λ=None, V=None, eps=1e-2):
         'act':  relu(),
     }
 
-input_whitening_net = network(conv_pool_block=conv_pool_block_pre, prep_block=partial(whitening_block, Λ=Λ, V=V), scale=1/16, types={
+input_whitening_net = build_network(conv_pool_block=conv_pool_block_pre, prep_block=partial(whitening_block, Λ=Λ, V=V), scale=1/16, types={
     nn.ReLU: partial(nn.CELU, 0.3),
     BatchNorm: partial(GhostBatchNorm, num_splits=16, weight=False)
 })
@@ -473,14 +466,15 @@ opt_params_bias = {'lr': lr_schedule([0, epochs/5, epochs - ema_epochs], [0.0, 1
 epoch_logs = Table(report=lambda data: data['epoch'] % epochs == 0)
 
 for run in range(3):
-    model = build_model(input_whitening_net, label_smoothing_loss(0.2))
+    
+    loss_fn = label_smoothing_loss(0.2)
+    model = Network(input_whitening_net).half().cuda()
+    ema_model = copy.deepcopy(model)
+    
     bias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' in k]
     nonbias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' not in k]
-    
     nonbias_opt = SGD(nonbias_params, opt_params)
     bias_opt = SGD(bias_params, opt_params_bias)
-    
-    ema_model = copy.deepcopy(model)
     
     momentum = 0.99
     update_freq = 5
@@ -499,7 +493,8 @@ for run in range(3):
             
             ## forward and logging
             batch = {'input': inputs.half(), 'target': labels}
-            out = model.loss(model(batch))
+#             out = model.loss(model(batch))
+            out = loss_fn(model(batch))
             logs.extend((k, out[k].detach()) for k in node_names)
             
             ## backward
@@ -531,7 +526,7 @@ for run in range(3):
                 inputs = batch['input']
                 logits = ema_model({'input': inputs})['logits']
                 logits_flip = ema_model({'input': inputs.flip(-1)})['logits']
-                out = ema_model.loss(dict(batch, logits=(logits+logits_flip)/2))
+                out = loss_fn(dict(batch, logits=(logits+logits_flip)/2))
             
             logs.extend((k, out[k].detach()) for k in node_names)
 
@@ -546,6 +541,3 @@ for run in range(3):
         }
         
         epoch_logs.append({'run': run+1, 'epoch': epoch+1, **log})
-
-print(epoch_logs.df())
-
