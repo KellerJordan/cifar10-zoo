@@ -1,4 +1,3 @@
-#@title Lib (RUN ME) - double-click to show/hide code
 ####################
 ## CORE
 #####################
@@ -49,67 +48,6 @@ def build_graph(net, path_map='_'.join):
             for (path, (typ, value, inputs)), default in zip(net.items(), default_inputs)}
 
 #####################
-## network visualisation (requires pydot)
-#####################
-import IPython.display
-
-class ColorMap(dict):
-    palette = (
-        'bebada,ffffb3,fb8072,8dd3c7,80b1d3,fdb462,b3de69,fccde5,bc80bd,ccebc5,ffed6f,1f78b4,33a02c,e31a1c,ff7f00,'
-        '4dddf8,e66493,b07b87,4e90e3,dea05e,d0c281,f0e189,e9e8b1,e0eb71,bbd2a4,6ed641,57eb9c,3ca4d4,92d5e7,b15928'
-    ).split(',')
- 
-    def __missing__(self, key):
-        self[key] = self.palette[len(self) % len(self.palette)]
-        return self[key]
-
-def make_pydot(nodes, edges, direction='LR', sep='_', **kwargs):
-    from pydot import Dot, Cluster, Node, Edge
-    class Subgraphs(dict):
-        def __missing__(self, path):
-            *parent, label = path
-            subgraph = Cluster(sep.join(path), label=label, style='rounded, filled', fillcolor='#77777744')
-            self[tuple(parent)].add_subgraph(subgraph)
-            return subgraph
-    g = Dot(rankdir=direction, directed=True, **kwargs)
-    g.set_node_defaults(
-        shape='box', style='rounded, filled', fillcolor='#ffffff')
-    subgraphs = Subgraphs({(): g})
-    for path, attr in nodes:
-        *parent, label = path.split(sep)
-        subgraphs[tuple(parent)].add_node(
-            Node(name=path, label=label, **attr))
-    for src, dst, attr in edges:
-        g.add_edge(Edge(src, dst, **attr))
-    return g
-
-class DotGraph():
-    colors = ColorMap()   
-    def __init__(self, graph, size=15, direction='LR'):
-        self.nodes = [(k, {
-            'tooltip': '%s %.1000r' % (typ, value), 
-            'fillcolor': '#'+self.colors[typ],
-        }) for k, (typ, value, inputs) in graph.items()] 
-        self.edges = [(src, k, {}) for (k, (_,_,inputs)) in graph.items() for src in inputs]
-        self.size, self.direction = size, direction
-
-    def dot_graph(self, **kwargs):
-        return make_pydot(self.nodes, self.edges, size=self.size, 
-                            direction=self.direction, **kwargs)
-
-    def svg(self, **kwargs):
-        return self.dot_graph(**kwargs).create(format='svg').decode('utf-8')
-
-    try:
-        import pydot
-        def _repr_svg_(self):
-            return self.svg()
-    except ImportError:
-        def __repr__(self):
-            return 'pydot is needed for network visualisation'
-
-
-#####################
 ## Layers
 ##################### 
 
@@ -148,7 +86,6 @@ class Network(nn.Module):
         return self
 
 build_model = lambda network, loss: Network(network, loss).half().to(device)
-show = lambda network, size=15: display(DotGraph(network.graph if isinstance(network, Network) else build_graph(network), size=size))
     
 class Add(namedtuple('Add', [])):
     def __call__(self, x, y): return x + y 
@@ -270,9 +207,6 @@ def nesterov_update(w, dw, v, lr, weight_decay, momentum):
 
 norm = lambda x: torch.norm(x.reshape(x.size(0),-1).float(), dim=1)[:,None,None,None]
 
-def LARS_update(w, dw, v, lr, weight_decay, momentum):
-    nesterov_update(w, dw, v, lr*(norm(w)/(norm(dw)+1e-2)).to(w.dtype), weight_decay, momentum)
-
 def zeros_like(weights):
     return [torch.zeros_like(w) for w in weights]
 
@@ -288,7 +222,6 @@ def opt_step(update, param_schedule, step_number, weights, opt_state):
             update(w.data, w.grad.data, v, **param_values)
     return {'update': update, 'param_schedule': param_schedule, 'step_number': step_number, 'weights': weights,  'opt_state': opt_state}
 
-LARS = partial(optimiser, update=LARS_update, state_init=zeros_like)
 SGD = partial(optimiser, update=nesterov_update, state_init=zeros_like)
   
 class PiecewiseLinear(namedtuple('PiecewiseLinear', ('knots', 'vals'))):
@@ -544,51 +477,6 @@ def train_epoch(state, timer, train_batches, valid_batches, train_steps=train_st
 
 summary = lambda logs, cols=['valid_acc']: logs.df().query('epoch==epoch.max()')[cols].describe().transpose().astype({'count': int})[
     ['count', 'mean', 'min', 'max', 'std']]
-
-#on_epoch_end
-def log_weights(state, weights):
-    state[WEIGHT_LOG] = state.get(WEIGHT_LOG, [])
-    state[WEIGHT_LOG].append({k: to_numpy(v.data) for k,v in weights.items()})
-    return state
-
-def fine_tune_bn_stats(state, batches, model_key=VALID_MODEL):
-    reduce(batches, {MODEL: state[model_key]}, [forward(True)])
-    return state
-
-#misc
-def warmup_cudnn(model, batch):
-    #run forward and backward pass of the model
-    #to allow benchmarking of cudnn kernels 
-    reduce([batch], {MODEL: model}, [forward(True), backward()])
-    torch.cuda.synchronize()
-
-
-#####################
-## Plotting
-#####################
-
-import altair as alt
-alt.renderers.enable('colab')
-import pandas as pd
-import matplotlib.pyplot as plt
-from IPython.display import SVG
-
-def empty_plot(ax, **kw):
-    ax.axis('off')
-    return ax
-
-def image_plot(ax, img, title):
-    ax.imshow(to_numpy(unnormalise(transpose(img, 'CHW', 'HWC'))).astype(np.int))
-    ax.set_title(title)
-    ax.axis('off')
-
-def layout(figures, sharex=False, sharey=False, figure_title=None, col_width=4, row_height = 3.25, **kw):
-    nrows, ncols = np.array(figures).shape
-
-    fig, axs = plt.subplots(nrows=nrows, ncols=ncols, sharex=sharex, sharey=sharey, figsize=(col_width*ncols, row_height*nrows))
-    axs = [figure(ax, **kw) for row in zip(np.array(axs).reshape(nrows, ncols), figures) for ax, figure in zip(*row)]
-    fig.suptitle(figure_title)
-    return fig, axs
 
 #####################
 ## Network
