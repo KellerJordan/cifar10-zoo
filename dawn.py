@@ -118,8 +118,6 @@ def path_iter(nested_dict, pfx=()):
         if isinstance(val, dict): yield from path_iter(val, pfx+make_tuple(name))
         else: yield (pfx+make_tuple(name), val)  
             
-map_values = lambda func, dct: {k: func(v) for k,v in dct.items()}
-
 def map_nested(func, nested_dict):
     return {k: map_nested(func, v) if isinstance(v, dict) else func(v) for k,v in nested_dict.items()}
 
@@ -274,15 +272,6 @@ def map_types(mapping, net):
         typ, *rest = node
         return (mapping.get(typ, typ), *rest)
     return map_nested(f, net) 
-
-#####################
-## Compat
-##################### 
-
-def to_numpy(x):
-    if isinstance(x, torch.Tensor):
-        return x.detach().cpu().numpy()  
-    return x
 
 #####################
 ## Optimisers
@@ -445,8 +434,6 @@ train_aug = dict(flip=True, translate=4)
 train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=512, aug=train_aug)
 test_loader = PrepadCifarLoader('/tmp/cifar10', train=False, batch_size=1000)
 
-valid_batches = [{'input': inputs.half(), 'target': labels} for (inputs, labels) in test_loader]
-
 train_images = train_loader.normalize(train_loader.images)[:10000]
 
 Λ, V = eigens(patches(train_images)) #center crop to remove padding
@@ -530,10 +517,9 @@ for run in range(3):
                         continue
                     ema_v *= rho
                     ema_v += (1-rho)*v
-            
-        res = map_values((lambda xs: to_numpy(torch.cat(xs)).astype(np.float)), group_by_key(logs))
-        train_summary = {k: np.mean(v) for k, v in res.items()}
-
+        
+        train_summary = {k: torch.cat(xs).float().mean().item() for k, xs in group_by_key(logs).items()}
+        
         train_time = timer()
         logs.clear()
 
@@ -549,8 +535,7 @@ for run in range(3):
             
             logs.extend((k, out[k].detach()) for k in node_names)
 
-        res = map_values((lambda xs: to_numpy(torch.cat(xs)).astype(np.float)), group_by_key(logs))
-        valid_summary = {k: np.mean(v) for k, v in res.items()}
+        valid_summary = {k: torch.cat(xs).float().mean().item() for k, xs in group_by_key(logs).items()}
 
         valid_time = timer(update_total=False)
 
@@ -562,4 +547,5 @@ for run in range(3):
         
         epoch_logs.append({'run': run+1, 'epoch': epoch+1, **log})
 
+print(epoch_logs.df())
 
