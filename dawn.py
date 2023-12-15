@@ -541,3 +541,100 @@ for run in range(3):
         }
         
         epoch_logs.append({'run': run+1, 'epoch': epoch+1, **log})
+
+
+#######
+# 80-epoch training
+######
+
+epochs = 80
+batch_size = 512
+ema_epochs = 2
+
+lr_schedule = lambda knots, vals, batch_size: PiecewiseLinear(np.array(knots)*len(train_loader), np.array(vals)/batch_size)
+
+opt_params = {'lr': lr_schedule([0, epochs/5, epochs - ema_epochs], [0.0, 0.4, 0.04], batch_size),
+              'weight_decay': Const(5e-4*batch_size), 'momentum': Const(0.9)}
+opt_params_bias = {'lr': lr_schedule([0, epochs/5, epochs - ema_epochs], [0.0, 0.4*64, 0.04*64], batch_size),
+                   'weight_decay': Const(5e-4*batch_size/64), 'momentum': Const(0.9)}
+
+epoch_logs = Table(report=lambda data: data['epoch'] % epochs == 0)
+
+for run in range(3):
+    
+    loss_fn = label_smoothing_loss(0.2)
+    model = Network(input_whitening_net).half().cuda()
+    ema_model = copy.deepcopy(model)
+    
+    bias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' in k]
+    nonbias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' not in k]
+    nonbias_opt = SGD(nonbias_params, opt_params)
+    bias_opt = SGD(bias_params, opt_params_bias)
+    
+    momentum = 0.99
+    update_freq = 5
+    rho = momentum**update_freq
+    iter_counter = count()
+    
+    timer = Timer(torch.cuda.synchronize)
+    
+    for epoch in tqdm(range(epochs)):
+        
+        logs = []
+        node_names = ('loss', 'acc')
+        
+        model.train()
+        for inputs, labels in train_loader:
+            
+            ## forward and logging
+            batch = {'input': inputs.half(), 'target': labels}
+            out = loss_fn(model(batch))
+            logs.extend((k, out[k].detach()) for k in node_names)
+            
+            ## backward
+            model.zero_grad()
+            out['loss'].sum().backward()
+            
+            ## optimizer step
+            nonbias_opt = opt_step(**nonbias_opt)
+            bias_opt = opt_step(**bias_opt)
+            
+            ## ema update
+            if next(iter_counter) % update_freq == 0:
+                for (k, v), ema_v in zip(model.state_dict().items(), ema_model.state_dict().values()):
+                    if 'num_batches_tracked' in k:
+                        continue
+                    ema_v *= rho
+                    ema_v += (1-rho)*v
+        
+        train_summary = {k: torch.cat(xs).float().mean().item() for k, xs in group_by_key(logs).items()}
+        
+        train_time = timer()
+        logs.clear()
+
+        ema_model.eval()
+        for inputs, labels in test_loader:
+            batch = {'input': inputs.half(), 'target': labels}
+            
+            with torch.no_grad():
+                inputs = batch['input']
+                logits = ema_model({'input': inputs})['logits']
+                logits_flip = ema_model({'input': inputs.flip(-1)})['logits']
+                out = loss_fn(dict(batch, logits=(logits+logits_flip)/2))
+            
+            logs.extend((k, out[k].detach()) for k in node_names)
+
+        valid_summary = {k: torch.cat(xs).float().mean().item() for k, xs in group_by_key(logs).items()}
+
+        valid_time = timer(update_total=False)
+
+        log = {
+            'train': {'time': train_time, **train_summary}, 
+            'valid': {'time': valid_time, **valid_summary}, 
+            'total time': timer.total_time
+        }
+        
+        epoch_logs.append({'run': run+1, 'epoch': epoch+1, **log})
+
+
+
