@@ -98,17 +98,15 @@ class PrepadCifarLoader:
             yield (images[idxs], self.labels[idxs])
 
 
+from tqdm import tqdm
+
 ####################
-## CORE
+## Logging and timing
 #####################
 
+import time
 from collections import namedtuple, defaultdict
-from functools import partial
-from itertools import chain, count
-
-#####################
-## dict utils
-#####################
+from itertools import count
 
 make_tuple = lambda path: (path,) if isinstance(path, str) else path
 
@@ -123,59 +121,6 @@ def group_by_key(seq):
         res[k].append(v) 
     return res
 
-#####################
-## Layers
-##################### 
-
-import pandas as pd
-import numpy as np
-import torch
-from torch import nn
-import torch.nn.functional as F
-from collections import namedtuple
-import copy
-
-torch.backends.cudnn.benchmark = True
-
-class BatchNorm(nn.BatchNorm2d):
-    def __init__(self, num_features, eps=1e-05, momentum=0.1, weight=True, bias=True):
-        super().__init__(num_features, eps=eps, momentum=momentum)
-        self.weight.data.fill_(1.0)
-        self.bias.data.fill_(0.0)
-        self.weight.requires_grad = weight
-        self.bias.requires_grad = bias
-
-class GhostBatchNorm(BatchNorm):
-    def __init__(self, num_features, num_splits, **kw):
-        super().__init__(num_features, **kw)
-        self.num_splits = num_splits
-        self.register_buffer('running_mean', torch.zeros(num_features*self.num_splits))
-        self.register_buffer('running_var', torch.ones(num_features*self.num_splits))
-
-    def train(self, mode=True):
-        if (self.training is True) and (mode is False): #lazily collate stats when we are going to use them
-            self.running_mean = torch.mean(self.running_mean.view(self.num_splits, self.num_features), dim=0).repeat(self.num_splits)
-            self.running_var = torch.mean(self.running_var.view(self.num_splits, self.num_features), dim=0).repeat(self.num_splits)
-        return super().train(mode)
-        
-    def forward(self, input):
-        N, C, H, W = input.shape
-        if self.training or not self.track_running_stats:
-            return F.batch_norm(
-                input.view(-1, C*self.num_splits, H, W), self.running_mean, self.running_var, 
-                self.weight.repeat(self.num_splits), self.bias.repeat(self.num_splits),
-                True, self.momentum, self.eps).view(N, C, H, W) 
-        else:
-            return F.batch_norm(
-                input, self.running_mean[:self.num_features], self.running_var[:self.num_features], 
-                self.weight, self.bias, False, self.momentum, self.eps)
-
-
-#####################
-## TRAINING
-#####################
-
-import time
 
 class Timer():
     def __init__(self, synch=None):
@@ -217,6 +162,52 @@ class Table():
         return pd.DataFrame([{'_'.join(p): v for p,v in path_iter(row)} for row in self.log])
 
 #####################
+## Layers
+##################### 
+
+import pandas as pd
+import numpy as np
+import torch
+from torch import nn
+import torch.nn.functional as F
+import copy
+
+torch.backends.cudnn.benchmark = True
+
+class BatchNorm(nn.BatchNorm2d):
+    def __init__(self, num_features, eps=1e-05, momentum=0.1, weight=True, bias=True):
+        super().__init__(num_features, eps=eps, momentum=momentum)
+        self.weight.data.fill_(1.0)
+        self.bias.data.fill_(0.0)
+        self.weight.requires_grad = weight
+        self.bias.requires_grad = bias
+
+class GhostBatchNorm(BatchNorm):
+    def __init__(self, num_features, num_splits, **kw):
+        super().__init__(num_features, **kw)
+        self.num_splits = num_splits
+        self.register_buffer('running_mean', torch.zeros(num_features*self.num_splits))
+        self.register_buffer('running_var', torch.ones(num_features*self.num_splits))
+
+    def train(self, mode=True):
+        if (self.training is True) and (mode is False): #lazily collate stats when we are going to use them
+            self.running_mean = torch.mean(self.running_mean.view(self.num_splits, self.num_features), dim=0).repeat(self.num_splits)
+            self.running_var = torch.mean(self.running_var.view(self.num_splits, self.num_features), dim=0).repeat(self.num_splits)
+        return super().train(mode)
+        
+    def forward(self, input):
+        N, C, H, W = input.shape
+        if self.training or not self.track_running_stats:
+            return F.batch_norm(
+                input.view(-1, C*self.num_splits, H, W), self.running_mean, self.running_var, 
+                self.weight.repeat(self.num_splits), self.bias.repeat(self.num_splits),
+                True, self.momentum, self.eps).view(N, C, H, W) 
+        else:
+            return F.batch_norm(
+                input, self.running_mean[:self.num_features], self.running_var[:self.num_features], 
+                self.weight, self.bias, False, self.momentum, self.eps)
+
+#####################
 ## Misc
 #####################
 
@@ -232,7 +223,6 @@ def eigens(patches):
     X = X/np.sqrt(len(X) - 1)
     Σ = X.T @ X
     
-#     Λ, V = torch.symeig(Σ, eigenvectors=True)
     Λ, V = torch.linalg.eigh(Σ, UPLO='U')
     
     return Λ.flip(0), V.t().reshape(c*h*w, c, h, w).flip(0)
@@ -240,9 +230,6 @@ def eigens(patches):
 train_loader = PrepadCifarLoader('/tmp/cifar10', train=True)
 train_images = train_loader.normalize(train_loader.images)[:10000]
 Λ, V = eigens(patches(train_images))
-
-from tqdm import tqdm
-
 
 class Residual(nn.Module):
     def __init__(self, module):
@@ -362,8 +349,6 @@ for run in range(25):
     
     timer = Timer(torch.cuda.synchronize)
     
-    xx = []
-    
     for epoch in tqdm(range(epochs)):
         
         logs = []
@@ -380,8 +365,6 @@ for run in range(25):
             ## backward
             opt.zero_grad(set_to_none=True)
             losses.sum().backward()
-            
-            xx.append(losses.detach().mean().item())
             
             ## optimizer step
             opt.step()
