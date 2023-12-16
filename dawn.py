@@ -253,44 +253,6 @@ def map_types(mapping, net):
     return map_nested(f, net) 
 
 #####################
-## Optimisers
-##################### 
-
-from functools import partial
-
-def nesterov_update(w, dw, v, lr, weight_decay, momentum):
-    dw.add_(weight_decay, w).mul_(-lr)
-    v.mul_(momentum).add_(dw)
-    w.add_(dw.add_(momentum, v))
-
-norm = lambda x: torch.norm(x.reshape(x.size(0),-1).float(), dim=1)[:,None,None,None]
-
-def zeros_like(weights):
-    return [torch.zeros_like(w) for w in weights]
-
-def optimiser(weights, param_schedule, update, state_init):
-    weights = list(weights)
-    return {'update': update, 'param_schedule': param_schedule, 'step_number': 0, 'weights': weights,  'opt_state': state_init(weights)}
-
-def opt_step(update, param_schedule, step_number, weights, opt_state):
-    step_number += 1
-    param_values = {k: f(step_number) for k, f in param_schedule.items()}
-    for w, v in zip(weights, opt_state):
-        if w.requires_grad:
-            update(w.data, w.grad.data, v, **param_values)
-    return {'update': update, 'param_schedule': param_schedule, 'step_number': step_number, 'weights': weights,  'opt_state': opt_state}
-
-SGD = partial(optimiser, update=nesterov_update, state_init=zeros_like)
-
-class PiecewiseLinear(namedtuple('PiecewiseLinear', ('knots', 'vals'))):
-    def __call__(self, t):
-        return np.interp([t], self.knots, self.vals)[0]
-     
-class Const(namedtuple('Const', ['val'])):
-    def __call__(self, x):
-        return self.val
-
-#####################
 ## TRAINING
 #####################
 
@@ -425,30 +387,48 @@ input_whitening_net = build_network(conv_pool_block=conv_pool_block_pre, prep_bl
 
 from tqdm import tqdm
 
+def nesterov_update(w, dw, v, lr, weight_decay, momentum):
+    dw.add_(weight_decay, w).mul_(-lr)
+    v.mul_(momentum).add_(dw)
+    w.add_(dw.add_(momentum, v))
+
+def opt_step(lr, weight_decay, weights, opt_state):
+    for w, v in zip(weights, opt_state):
+        if w.requires_grad:
+            nesterov_update(w.data, w.grad.data, v, lr=lr, weight_decay=weight_decay, momentum=0.9)
+
+class PiecewiseLinear(namedtuple('PiecewiseLinear', ('knots', 'vals'))):
+    def __call__(self, t):
+#         print('called with t=', t)
+        return np.interp([t], self.knots, self.vals)[0]
+
 epochs = 10
 batch_size = 512
 ema_epochs = 2
 
-lr_schedule = lambda knots, vals, batch_size: PiecewiseLinear(np.array(knots)*len(train_loader), np.array(vals)/batch_size)
+lr_schedule = lambda knots, vals, batch_size: PiecewiseLinear(np.array(knots)*len(train_loader),
+                                                              np.array(vals)/batch_size)
 
-opt_params = {'lr': lr_schedule([0, epochs/5, epochs - ema_epochs], [0.0, 1.0, 0.1], batch_size),
-              'weight_decay': Const(5e-4*batch_size), 'momentum': Const(0.9)}
-opt_params_bias = {'lr': lr_schedule([0, epochs/5, epochs - ema_epochs], [0.0, 1.0*64, 0.1*64], batch_size),
-                   'weight_decay': Const(5e-4*batch_size/64), 'momentum': Const(0.9)}
+nonbias_wd = 5e-4*batch_size
+bias_wd = 5e-4*batch_size/64
+momentum = 0.9
+nonbias_sched = lr_schedule([0, epochs/5, epochs - ema_epochs], [0.0, 1.0, 0.1], batch_size)
+bias_sched = lr_schedule([0, epochs/5, epochs - ema_epochs], [0.0, 1.0*64, 0.1*64], batch_size)
 
 epoch_logs = Table(report=lambda data: data['epoch'] % epochs == 0)
 
-for run in range(3):
+for run in range(1):
     
     loss_fn = nn.CrossEntropyLoss(label_smoothing=0.2, reduction='none')
     
     model = Network(input_whitening_net).half().cuda()
     ema_model = copy.deepcopy(model)
     
-    bias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' in k]
+    step = 0
     nonbias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' not in k]
-    nonbias_opt = SGD(nonbias_params, opt_params)
-    bias_opt = SGD(bias_params, opt_params_bias)
+    bias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' in k]
+    nonbias_state = [torch.zeros_like(w) for w in nonbias_params]
+    bias_state = [torch.zeros_like(w) for w in bias_params]
     
     momentum = 0.99
     update_freq = 5
@@ -468,17 +448,20 @@ for run in range(3):
             ## forward and logging
             batch = {'input': inputs.half(), 'target': labels}
             out = model(batch)
-            out['loss'] = loss_fn(out['logits'], labels)
-            out['acc'] = (out['logits'].detach().argmax(1) == labels)
-            logs.extend((k, out[k].detach()) for k in node_names)
+            loss = loss_fn(out['logits'], labels)
+            acc = (out['logits'].detach().argmax(1) == labels)
+            logs.extend([('loss', loss), ('acc', acc)])
             
             ## backward
             model.zero_grad()
-            out['loss'].sum().backward()
+            loss.sum().backward()
             
             ## optimizer step
-            nonbias_opt = opt_step(**nonbias_opt)
-            bias_opt = opt_step(**bias_opt)
+            step += 1
+            nonbias_lr = nonbias_sched(step)
+            bias_lr = bias_sched(step)
+            opt_step(nonbias_lr, nonbias_wd, nonbias_params, nonbias_state)
+            opt_step(bias_lr, bias_wd, bias_params, bias_state)
             
             ## ema update
             if next(iter_counter) % update_freq == 0:
@@ -503,9 +486,9 @@ for run in range(3):
                 logits_flip = ema_model({'input': inputs.flip(-1)})['logits']
                 logits_tta = (logits + logits_flip) / 2
                 
-            out['loss'] = loss_fn(logits_tta, labels)
-            out['acc'] = (logits_tta.argmax(1) == labels)
-            logs.extend((k, out[k].detach()) for k in node_names)
+            loss = loss_fn(logits_tta, labels)
+            acc = (logits_tta.argmax(1) == labels)
+            logs.extend([('loss', loss), ('acc', acc)])
 
         valid_summary = {k: torch.cat(xs).float().mean().item() for k, xs in group_by_key(logs).items()}
 
@@ -518,3 +501,4 @@ for run in range(3):
         }
         
         epoch_logs.append({'run': run+1, 'epoch': epoch+1, **log})
+
