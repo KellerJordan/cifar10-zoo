@@ -121,7 +121,6 @@ def group_by_key(seq):
         res[k].append(v) 
     return res
 
-
 class Timer():
     def __init__(self, synch=None):
         self.synch = synch or (lambda: None)
@@ -207,10 +206,6 @@ class GhostBatchNorm(BatchNorm):
                 input, self.running_mean[:self.num_features], self.running_var[:self.num_features], 
                 self.weight, self.bias, False, self.momentum, self.eps)
 
-#####################
-## Misc
-#####################
-
 class Residual(nn.Module):
     def __init__(self, module):
         super().__init__()
@@ -232,31 +227,6 @@ class Mul(nn.Module):
 def conv(in_channels, out_channels, kernel_size=3, padding=1):
     return nn.Conv2d(in_channels, out_channels,
                      kernel_size=kernel_size, stride=1, padding=padding, bias=False)
-
-def patches(data, patch_size=(3, 3)):
-    h, w = patch_size
-    c = data.size(1)
-    return data.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1, c, h, w).float()
-
-def eigens(patches):
-    n,c,h,w = patches.shape
-    
-    patches_flat = patches.reshape(n, c*h*w)
-    cov = (patches_flat.T @ patches_flat) / (n - 1)
-    eigenvalues,eigenvectors = torch.linalg.eigh(cov, UPLO='U')
-    
-    return eigenvalues.flip(0), eigenvectors.T.reshape(c*h*w, c, h, w).flip(0)
-
-train_loader = PrepadCifarLoader('/tmp/cifar10', train=True)
-train_images = train_loader.normalize(train_loader.images)[:10000]
-eigenvalues, eigenvectors = eigens(patches(train_images))
-
-def whitening_conv(eps=1e-2):
-    weight = eigenvectors / (eigenvalues+eps).sqrt()[:, None, None, None]
-    filt = nn.Conv2d(3, 27, kernel_size=(3,3), padding=(1,1), bias=False)
-    filt.weight.data[:] = weight
-    filt.weight.requires_grad = False
-    return filt
 
 act = nn.CELU(0.3)
 bn = lambda channels: GhostBatchNorm(channels, num_splits=16, weight=False)
@@ -289,8 +259,6 @@ def make_net():
         nn.Linear(512, 10, bias=False),
         Mul(1/16),
     )
-    whiten_conv = whitening_conv()
-    net[0] = whiten_conv
     net = net.cuda().half()
     
     if True:
@@ -304,6 +272,35 @@ def make_net():
         net[6].module[4].float()
     
     return net
+
+def patches(data, patch_size=(3, 3)):
+    h, w = patch_size
+    c = data.size(1)
+    return data.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1, c, h, w).float()
+
+def eigens(patches):
+    n,c,h,w = patches.shape
+    
+    patches_flat = patches.reshape(n, c*h*w)
+    cov = (patches_flat.T @ patches_flat) / (n - 1)
+    eigenvalues,eigenvectors = torch.linalg.eigh(cov, UPLO='U')
+    
+    return eigenvalues.flip(0), eigenvectors.T.reshape(c*h*w, c, h, w).flip(0)
+
+train_loader = PrepadCifarLoader('/tmp/cifar10', train=True)
+train_images = train_loader.normalize(train_loader.images)[:10000]
+eigenvalues, eigenvectors = eigens(patches(train_images))
+
+def whitening_conv(eps=1e-2):
+    weight = eigenvectors / (eigenvalues+eps).sqrt()[:, None, None, None]
+    filt = nn.Conv2d(3, 27, kernel_size=(3,3), padding=(1,1), bias=False)
+    filt.weight.data[:] = weight.half()
+    filt.weight.requires_grad = False
+    return filt
+
+def init_net(net, train_images):
+    whiten_conv = whitening_conv()
+    net[0] = whiten_conv.half().cuda()
 
 
 epochs = 10
@@ -327,9 +324,11 @@ sched = np.interp(np.arange(1+total_train_steps),
 
 epoch_logs = Table(report=lambda data: data['epoch'] % epochs == 0)
 
-for run in range(25):
+for run in range(100):
     
     model = make_net()
+    train_images = train_loader.normalize(train_loader.images)[:10000]
+    init_net(model, train_images)
     
     ## optimizer setup
     nonbias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' not in k]
