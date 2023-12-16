@@ -387,19 +387,20 @@ input_whitening_net = build_network(conv_pool_block=conv_pool_block_pre, prep_bl
 
 from tqdm import tqdm
 
+## original
 def nesterov_update(w, dw, v, lr, weight_decay, momentum):
-    dw.add_(weight_decay, w).mul_(-lr)
+    dw.add_(weight_decay, w).mul_(-lr) # this is happening too early.
     v.mul_(momentum).add_(dw)
     w.add_(dw.add_(momentum, v))
 
-def opt_step(lr, weight_decay, weights, opt_state):
-    for w, v in zip(weights, opt_state):
-        if w.requires_grad:
-            nesterov_update(w.data, w.grad.data, v, lr=lr, weight_decay=weight_decay, momentum=0.9)
+## correct
+# def nesterov_update(w, dw, v, lr, weight_decay, momentum):
+#     dw.add_(weight_decay, w)
+#     v.mul_(momentum).add_(dw)
+#     w.add_(-lr, dw.add_(momentum, v))
 
 class PiecewiseLinear(namedtuple('PiecewiseLinear', ('knots', 'vals'))):
     def __call__(self, t):
-#         print('called with t=', t)
         return np.interp([t], self.knots, self.vals)[0]
 
 epochs = 10
@@ -417,7 +418,7 @@ bias_sched = lr_schedule([0, epochs/5, epochs - ema_epochs], [0.0, 1.0*64, 0.1*6
 
 epoch_logs = Table(report=lambda data: data['epoch'] % epochs == 0)
 
-for run in range(1):
+for run in range(10):
     
     loss_fn = nn.CrossEntropyLoss(label_smoothing=0.2, reduction='none')
     
@@ -430,9 +431,9 @@ for run in range(1):
     nonbias_state = [torch.zeros_like(w) for w in nonbias_params]
     bias_state = [torch.zeros_like(w) for w in bias_params]
     
-    momentum = 0.99
+    ema_momentum = 0.99
     update_freq = 5
-    rho = momentum**update_freq
+    rho = ema_momentum**update_freq
     iter_counter = count()
     
     timer = Timer(torch.cuda.synchronize)
@@ -460,8 +461,10 @@ for run in range(1):
             step += 1
             nonbias_lr = nonbias_sched(step)
             bias_lr = bias_sched(step)
-            opt_step(nonbias_lr, nonbias_wd, nonbias_params, nonbias_state)
-            opt_step(bias_lr, bias_wd, bias_params, bias_state)
+            for w, v in zip(nonbias_params, nonbias_state):
+                nesterov_update(w.data, w.grad, v, nonbias_lr, nonbias_wd, momentum)
+            for w, v in zip(bias_params, bias_state):
+                nesterov_update(w.data, w.grad, v, bias_lr, bias_wd, momentum)
             
             ## ema update
             if next(iter_counter) % update_freq == 0:
@@ -501,4 +504,6 @@ for run in range(1):
         }
         
         epoch_logs.append({'run': run+1, 'epoch': epoch+1, **log})
+
+
 
