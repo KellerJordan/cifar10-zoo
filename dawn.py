@@ -101,11 +101,11 @@ class PrepadCifarLoader:
 from tqdm import tqdm
 
 ####################
-## Logging and timing
+## Timing and logging
 #####################
 
 import time
-from collections import namedtuple, defaultdict
+from collections import defaultdict
 from itertools import count
 
 make_tuple = lambda path: (path,) if isinstance(path, str) else path
@@ -211,26 +211,6 @@ class GhostBatchNorm(BatchNorm):
 ## Misc
 #####################
 
-def patches(data, patch_size=(3, 3), dtype=torch.float32):
-    h, w = patch_size
-    c = data.size(1)
-    return data.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1, c, h, w).to(dtype)
-
-def eigens(patches):
-    n,c,h,w = patches.shape
-    
-    X = patches.reshape(n, c*h*w)
-    X = X/np.sqrt(len(X) - 1)
-    Σ = X.T @ X
-    
-    Λ, V = torch.linalg.eigh(Σ, UPLO='U')
-    
-    return Λ.flip(0), V.t().reshape(c*h*w, c, h, w).flip(0)
-
-train_loader = PrepadCifarLoader('/tmp/cifar10', train=True)
-train_images = train_loader.normalize(train_loader.images)[:10000]
-Λ, V = eigens(patches(train_images))
-
 class Residual(nn.Module):
     def __init__(self, module):
         super().__init__()
@@ -253,9 +233,28 @@ def conv(in_channels, out_channels, kernel_size=3, padding=1):
     return nn.Conv2d(in_channels, out_channels,
                      kernel_size=kernel_size, stride=1, padding=padding, bias=False)
 
+def patches(data, patch_size=(3, 3)):
+    h, w = patch_size
+    c = data.size(1)
+    return data.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1, c, h, w).float()
+
+def eigens(patches):
+    n,c,h,w = patches.shape
+    
+    patches_flat = patches.reshape(n, c*h*w)
+    cov = (patches_flat.T @ patches_flat) / (n - 1)
+    eigenvalues,eigenvectors = torch.linalg.eigh(cov, UPLO='U')
+    
+    return eigenvalues.flip(0), eigenvectors.T.reshape(c*h*w, c, h, w).flip(0)
+
+train_loader = PrepadCifarLoader('/tmp/cifar10', train=True)
+train_images = train_loader.normalize(train_loader.images)[:10000]
+eigenvalues, eigenvectors = eigens(patches(train_images))
+
 def whitening_conv(eps=1e-2):
+    weight = eigenvectors / (eigenvalues+eps).sqrt()[:, None, None, None]
     filt = nn.Conv2d(3, 27, kernel_size=(3,3), padding=(1,1), bias=False)
-    filt.weight.data = (V/torch.sqrt(Λ+eps)[:,None,None,None])
+    filt.weight.data[:] = weight
     filt.weight.requires_grad = False
     return filt
 
@@ -294,14 +293,15 @@ def make_net():
     net[0] = whiten_conv
     net = net.cuda().half()
     
-    net[1][1].float()
-    net[2][2].float()
-    net[3].module[1].float()
-    net[3].module[4].float()
-    net[4][2].float()
-    net[5][2].float()
-    net[6].module[1].float()
-    net[6].module[4].float()
+    if True:
+        net[1][1].float()
+        net[2][2].float()
+        net[3].module[1].float()
+        net[3].module[4].float()
+        net[4][2].float()
+        net[5][2].float()
+        net[6].module[1].float()
+        net[6].module[4].float()
     
     return net
 
