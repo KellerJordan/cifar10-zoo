@@ -126,7 +126,8 @@ class GhostBatchNorm(BatchNorm):
         self.register_buffer('running_var', torch.ones(num_features*self.num_splits))
 
     def train(self, mode=True):
-        if (self.training is True) and (mode is False): #lazily collate stats when we are going to use them
+        # lazily collate stats when we are going to use them
+        if (self.training is True) and (mode is False):
             self.running_mean = self.running_mean.view(self.num_splits, self.num_features).mean(0).repeat(self.num_splits)
             self.running_var = self.running_var.view(self.num_splits, self.num_features).mean(0).repeat(self.num_splits)
         return super().train(mode)
@@ -359,6 +360,6 @@ def main(run):
 
 if __name__ == '__main__':
     print_columns(logging_columns_list, is_head=True)
-    accs = torch.tensor([main(run) for run in range(100)])
+    accs = torch.tensor([main(run) for run in range(50)])
     print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
