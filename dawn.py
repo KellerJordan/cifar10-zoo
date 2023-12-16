@@ -387,40 +387,37 @@ input_whitening_net = build_network(conv_pool_block=conv_pool_block_pre, prep_bl
 
 from tqdm import tqdm
 
-class PiecewiseLinear(namedtuple('PiecewiseLinear', ('knots', 'vals'))):
-    def __call__(self, t):
-        return np.interp([t], self.knots, self.vals)[0]
-
 epochs = 10
 batch_size = 512
 ema_epochs = 2
 
 loss_fn = nn.CrossEntropyLoss(label_smoothing=0.2, reduction='none')
 
-lr = 1.0
+lr = 1.0 / 512
 momentum = 0.9
-wd = 5e-4
+wd = 5e-4 * 512
 
-lr_schedule = lambda knots, vals, batch_size: PiecewiseLinear(np.array(knots)*len(train_loader),
-                                                              np.array(vals)/batch_size)
-sched = lr_schedule([0, epochs/5, epochs - ema_epochs], [0.0, 1.0, 0.1], batch_size)
+total_train_steps = len(train_loader) * epochs
+sched2 = np.interp(np.arange(1+total_train_steps),
+                    [0, int(0.2 * total_train_steps), int(0.8 * total_train_steps), total_train_steps],
+                    [0, 1, 0.1, 0.1])
 
 epoch_logs = Table(report=lambda data: data['epoch'] % epochs == 0)
 
-for run in range(10):
+for run in range(1):
     
     model = Network(input_whitening_net).half().cuda()
     
-    ## optimizer state
+    ## optimizer setup
     nonbias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' not in k]
     bias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' in k]
-    hyp_nonbias = dict(params=nonbias_params, lr=lr, weight_decay=wd*batch_size)
-    hyp_bias = dict(params=bias_params, lr=lr*64, weight_decay=wd*batch_size/64)
+    hyp_nonbias = dict(params=nonbias_params, lr=lr, weight_decay=wd)
+    hyp_bias = dict(params=bias_params, lr=lr*64, weight_decay=wd/64)
     
     opt = torch.optim.SGD([hyp_nonbias, hyp_bias], momentum=momentum, nesterov=True)
-    scheduler = torch.optim.lr_scheduler.LambdaLR(opt, sched.__call__)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(opt, sched2.__getitem__)
     
-    ## ema state
+    ## ema setup
     ema_model = copy.deepcopy(model)
     ema_momentum = 0.99
     update_freq = 5
@@ -437,13 +434,13 @@ for run in range(10):
             
             ## forward and logging
             out = model({'input': inputs, 'target': labels})
-            loss = loss_fn(out['logits'], labels)
-            acc = (out['logits'].detach().argmax(1) == labels)
-            logs.extend([('loss', loss), ('acc', acc)])
+            losses = loss_fn(out['logits'], labels)
+            correct = (out['logits'].detach().argmax(1) == labels)
+            logs.extend([('losses', loss), ('acc', correct)])
             
             ## backward
             model.zero_grad()
-            loss.sum().backward()
+            losses.sum().backward()
             
             ## optimizer step
             scheduler.step()
@@ -466,9 +463,9 @@ for run in range(10):
                 logits = ema_model({'input': inputs})['logits']
                 logits_flip = ema_model({'input': inputs.flip(-1)})['logits']
                 logits_tta = (logits + logits_flip) / 2
-            loss = loss_fn(logits_tta, labels)
-            acc = (logits_tta.argmax(1) == labels)
-            logs.extend([('loss', loss), ('acc', acc)])
+            losses = loss_fn(logits_tta, labels)
+            correct = (logits_tta.argmax(1) == labels)
+            logs.extend([('loss', losses), ('acc', correct)])
 
         valid_summary = {k: torch.cat(xs).float().mean().item() for k, xs in group_by_key(logs).items()}
         valid_time = timer(update_total=False)
@@ -479,4 +476,9 @@ for run in range(10):
             'total time': timer.total_time
         }
         epoch_logs.append({'run': run+1, 'epoch': epoch+1, **log})
+        
+cols = ['valid_acc']
+summary = epoch_logs.df().query('epoch==epoch.max()')[cols].describe().transpose().astype({'count': int})[
+    ['count', 'mean', 'min', 'max', 'std']]
+print(summary)
 
