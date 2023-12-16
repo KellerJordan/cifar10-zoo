@@ -201,10 +201,10 @@ def make_net():
 def patches(data, patch_size=(3, 3)):
     h, w = patch_size
     c = data.size(1)
-    return data.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1, c, h, w).float()
+    return data.unfold(2, h, 1).unfold(3, w, 1).transpose(1, 3).reshape(-1, c, h, w).float()
 
 def eigens(patches):
-    n,c,h,w = patches.shape
+    n, c, h, w = patches.shape
     patches_flat = patches.reshape(n, c*h*w)
     cov = (patches_flat.T @ patches_flat) / (n - 1)
     eigenvalues, eigenvectors = torch.linalg.eigh(cov, UPLO='U')
@@ -216,23 +216,16 @@ def init_net(net, train_images, eps=1e-2):
     net[0].weight.data[:] = weight.half()
     net[0].weight.requires_grad = False
 
-def print_columns(columns_list, separator_left='|  ', separator_right='  ', final='|',
-                  column_heads_only=False, is_final_entry=False):
+def print_columns(columns_list, is_head=False, is_final_entry=False):
     print_string = ''
-    if column_heads_only:
-        for column_head_name in columns_list:
-            print_string += separator_left + column_head_name + separator_right
-        print_string += final
-        print('-'*(len(print_string))) # print the top bar
-        print(print_string)
-        print('-'*(len(print_string))) # print the bottom bar
-    else:
-        for column_value in columns_list:
-            print_string += separator_left + column_value + separator_right
-        print_string += final
-        print(print_string)
-    if is_final_entry:
-        print('-'*(len(print_string))) # print the final output bar
+    for col in columns_list:
+        print_string += '|  %s  ' % column_head_name
+    print_string += '|'
+    if is_head:
+        print('-'*len(print_string))
+    print(print_string)
+    if is_head or is_final_entry:
+        print('-'*len(print_string))
 
 logging_columns_list = ['run', 'epoch', 'train_loss', 'val_loss', 'train_acc', 'val_acc', 'ema_val_acc', 'tta_ema_val_acc', 'total_time_seconds']
 def print_training_details(variables, is_final_entry):
@@ -357,7 +350,7 @@ def main(run):
     return tta_ema_val_acc
 
 if __name__ == '__main__':
-    print_columns(logging_columns_list, column_heads_only=True)
+    print_columns(logging_columns_list, is_head=True)
     accs = torch.tensor([main(run) for run in range(100)])
     print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
