@@ -280,25 +280,16 @@ def patches(data, patch_size=(3, 3)):
 
 def eigens(patches):
     n,c,h,w = patches.shape
-    
     patches_flat = patches.reshape(n, c*h*w)
     cov = (patches_flat.T @ patches_flat) / (n - 1)
     eigenvalues, eigenvectors = torch.linalg.eigh(cov, UPLO='U')
-    
     return eigenvalues.flip(0), eigenvectors.T.reshape(c*h*w, c, h, w).flip(0)
 
-def whitening_conv(train_images, eps=1e-2):
+def init_net(net, train_images, eps=1e-2):
     eigenvalues, eigenvectors = eigens(patches(train_images))
     weight = eigenvectors / (eigenvalues+eps).sqrt()[:, None, None, None]
-
-    filt = nn.Conv2d(3, 27, kernel_size=(3,3), padding=(1,1), bias=False)
-    filt.weight.data[:] = weight
-    filt.weight.requires_grad = False
-    return filt
-
-def init_net(net, train_images):
-    whiten_conv = whitening_conv(train_images)
-    net[0] = whiten_conv.half().cuda()
+    net[0].weight.data[:] = weight.half().cuda()
+    net[0].weight.requires_grad = False
 
 def main():
     epochs = 10
@@ -322,7 +313,7 @@ def main():
 
     epoch_logs = Table(report=lambda data: data['epoch'] % epochs == 0)
 
-    for run in range(100):
+    for run in range(25):
         
         model = make_net()
         train_images = train_loader.normalize(train_loader.images)[:10000]
