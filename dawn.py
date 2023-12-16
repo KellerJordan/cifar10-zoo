@@ -98,78 +98,18 @@ class PrepadCifarLoader:
             yield (images[idxs], self.labels[idxs])
 
 
+import copy
 from tqdm import tqdm
-
-#####################
-## Timing and logging
-#####################
-
-import time
-from collections import defaultdict
 from itertools import count
-
-make_tuple = lambda path: (path,) if isinstance(path, str) else path
-
-def path_iter(nested_dict, pfx=()):
-    for name, val in nested_dict.items():
-        if isinstance(val, dict): yield from path_iter(val, pfx+make_tuple(name))
-        else: yield (pfx+make_tuple(name), val)  
-
-def group_by_key(seq):
-    res = defaultdict(list)
-    for k, v in seq: 
-        res[k].append(v) 
-    return res
-
-class Timer():
-    def __init__(self, synch=None):
-        self.synch = synch or (lambda: None)
-        self.synch()
-        self.times = [time.perf_counter()]
-        self.total_time = 0.0
-
-    def __call__(self, update_total=True):
-        self.synch()
-        self.times.append(time.perf_counter())
-        delta_t = self.times[-1] - self.times[-2]
-        if update_total:
-            self.total_time += delta_t
-        return delta_t
-
-default_table_formats = {float: '{:{w}.4f}', str: '{:>{w}s}', 'default': '{:{w}}', 'title': '{:>{w}s}'}
-
-def table_formatter(val, is_title=False, col_width=12, formats=None):
-    formats = formats or default_table_formats
-    type_ = lambda val: float if isinstance(val, (float, np.float)) else type(val)
-    return (formats['title'] if is_title else formats.get(type_(val), formats['default'])).format(val, w=col_width)
-
-class Table():
-    def __init__(self, keys=None, report=(lambda data: True), formatter=table_formatter):
-        self.keys, self.report, self.formatter = keys, report, formatter
-        self.log = []
-        
-    def append(self, data):
-        self.log.append(data)
-        data = {' '.join(p): v for p,v in path_iter(data)}
-        self.keys = self.keys or data.keys()
-        if len(self.log) == 1:
-            print(*(self.formatter(k, True) for k in self.keys))
-        if self.report(data):
-            print(*(self.formatter(data[k]) for k in self.keys))
-            
-    def df(self):
-        return pd.DataFrame([{'_'.join(p): v for p,v in path_iter(row)} for row in self.log])
 
 #####################
 ## Layers
 ##################### 
 
-import pandas as pd
 import numpy as np
 import torch
 from torch import nn
 import torch.nn.functional as F
-import copy
 
 torch.backends.cudnn.benchmark = True
 
@@ -276,7 +216,39 @@ def init_net(net, train_images, eps=1e-2):
     net[0].weight.data[:] = weight.half().cuda()
     net[0].weight.requires_grad = False
 
+def print_columns(columns_list, separator_left='|  ', separator_right='  ', final="|",
+                  column_heads_only=False, is_final_entry=False):
+    print_string = ""
+    if column_heads_only:
+        for column_head_name in columns_list:
+            print_string += separator_left + column_head_name + separator_right
+        print_string += final
+        print('-'*(len(print_string))) # print the top bar
+        print(print_string)
+        print('-'*(len(print_string))) # print the bottom bar
+    else:
+        for column_value in columns_list:
+            print_string += separator_left + column_value + separator_right
+        print_string += final
+        print(print_string)
+    if is_final_entry:
+        print('-'*(len(print_string))) # print the final output bar
+
+logging_columns_list = ['epoch', 'train_loss', 'val_loss', 'train_acc', 'val_acc', 'ema_val_acc', 'tta_ema_val_acc', 'total_time_seconds']
+def print_training_details(variables, is_final_entry):
+    formatted = []
+    for col in logging_columns_list:
+        if type(variables[col]) in (int, str):
+            res = str(variables[col])
+        elif type(variables[col]) is float:
+            res = '{:0.4f}'.format(variables[col])
+        else:
+            res = ''
+        formatted.append(res.rjust(len(col)))
+    print_columns(formatted, is_final_entry=is_final_entry)
+
 def main():
+
     epochs = 10
     batch_size = 512
     ema_epochs = 2
@@ -286,6 +258,7 @@ def main():
     lr = 1.0 / 512
     momentum = 0.9
     wd = 5e-4 * 512
+    bias_scaler = 64
 
     train_aug = dict(flip=True, translate=4)
     train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=batch_size, aug=train_aug)
@@ -296,86 +269,95 @@ def main():
                       [0, 2*len(train_loader), (epochs-ema_epochs)*len(train_loader), total_train_steps],
                       [0, 1, 0.1, 0.1])
 
-    epoch_logs = Table(report=lambda data: data['epoch'] % epochs == 0)
+    starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+    total_time_seconds = 0
 
-    for run in range(50):
+    model = make_net()
+    train_images = train_loader.normalize(train_loader.images)[:10000]
+    init_net(model, train_images)
+    
+    ## optimizer setup
+    nonbias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' not in k]
+    bias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' in k]
+    hyp_nonbias = dict(params=nonbias_params, lr=lr, weight_decay=wd)
+    hyp_bias = dict(params=bias_params, lr=lr*bias_scaler, weight_decay=wd/bias_scaler)
+    
+    opt = torch.optim.SGD([hyp_nonbias, hyp_bias], momentum=momentum, nesterov=True)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(opt, sched.__getitem__)
+    
+    ## ema setup
+    model_ema = copy.deepcopy(model)
+    ema_momentum = 0.99
+    update_freq = 5
+    rho = ema_momentum**update_freq
+    iter_counter = count()
+    
+    for epoch in range(epochs):
         
-        model = make_net()
-        train_images = train_loader.normalize(train_loader.images)[:10000]
-        init_net(model, train_images)
-        
-        ## optimizer setup
-        nonbias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' not in k]
-        bias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' in k]
-        hyp_nonbias = dict(params=nonbias_params, lr=lr, weight_decay=wd)
-        hyp_bias = dict(params=bias_params, lr=lr*64, weight_decay=wd/64)
-        
-        opt = torch.optim.SGD([hyp_nonbias, hyp_bias], momentum=momentum, nesterov=True)
-        scheduler = torch.optim.lr_scheduler.LambdaLR(opt, sched.__getitem__)
-        
-        ## ema setup
-        ema_model = copy.deepcopy(model)
-        ema_momentum = 0.99
-        update_freq = 5
-        rho = ema_momentum**update_freq
-        iter_counter = count()
-        
-        timer = Timer(torch.cuda.synchronize)
-        
-        for epoch in tqdm(range(epochs)):
-            
-            logs = []
-            model.train()
-            for inputs, labels in train_loader:
-                
-                ## forward and logging
-                outputs = model(inputs)
-        
-                losses = loss_fn(outputs, labels)
-                correct = (outputs.detach().argmax(1) == labels)
-                logs.extend([('loss', losses), ('acc', correct)])
-                
-                ## backward
-                opt.zero_grad(set_to_none=True)
-                losses.sum().backward()
-                
-                ## optimizer step
-                opt.step()
-                scheduler.step()
-                
-                ## ema update
-                if next(iter_counter) % update_freq == 0:
-                    for (k, v), ema_v in zip(model.state_dict().items(), ema_model.state_dict().values()):
-                        if 'num_batches_tracked' not in k:
-                            ema_v.lerp_(v, 1-rho)
-            
-            train_summary = {k: torch.cat(xs).float().mean().item() for k, xs in group_by_key(logs).items()}
-            train_time = timer()
+        ####################
+        #     Training     #
+        ####################
 
-            logs = []
-            ema_model.eval()
+        starter.record()
+
+        model.train()
+        for inputs, labels in train_loader:
+            
+            outputs = model(inputs)
+    
+            loss = loss_fn(outputs, labels).sum()
+            
+            opt.zero_grad(set_to_none=True)
+            loss.backward()
+            opt.step()
+            scheduler.step()
+            
+            ## ema update
+            if next(iter_counter) % update_freq == 0:
+                for (k, v), ema_v in zip(model.state_dict().items(), model_ema.state_dict().values()):
+                    if 'num_batches_tracked' not in k:
+                        ema_v.lerp_(v, 1-rho)
+        
+        ender.record()
+        torch.cuda.synchronize()
+        total_time_seconds += 1e-3 * starter.elapsed_time(ender)
+
+        ####################
+        #    Evaluation    #
+        ####################
+
+        ## the accuracy and loss from the last batch of training data in the epoch
+        train_acc = (outputs.detach().argmax(-1) == labels).float().mean().item()
+        train_loss = loss.item() / batch_size
+
+        model.eval()
+        model_ema.eval()
+        with torch.no_grad():
+
+            loss_list, acc_list, acc_list_ema, acc_list_ema_tta = [], [], [], []
+
             for inputs, labels in test_loader:
-                with torch.no_grad():
-                    logits_tta = ema_model(inputs) + ema_model(inputs.flip(-1))
-                losses = loss_fn(logits_tta, labels)
-                correct = (logits_tta.argmax(1) == labels)
-                logs.extend([('loss', losses), ('acc', correct)])
 
-            valid_summary = {k: torch.cat(xs).float().mean().item() for k, xs in group_by_key(logs).items()}
-            valid_time = timer(update_total=False)
-            
-            log = {
-                'train': {'time': train_time, **train_summary}, 
-                'valid': {'time': valid_time, **valid_summary}, 
-                'total time': timer.total_time
-            }
-            epoch_logs.append({'run': run+1, 'epoch': epoch+1, **log})
-            
-    cols = ['valid_acc']
-    summary = epoch_logs.df().query('epoch==epoch.max()')[cols].describe().transpose().astype({'count': int})[
-        ['count', 'mean', 'min', 'max', 'std']]
-    print(summary)
+                outputs = model(inputs)
+                loss_list.append(loss_fn(outputs, labels).float().mean())
+                acc_list.append((outputs.argmax(-1) == labels).float().mean())
 
-if __name__ == '__main__':
-    main()
+                outputs_ema = model_ema(inputs)
+                acc_list_ema.append((outputs_ema.argmax(-1) == labels).float().mean())
+                outputs_ema_tta = 0.5 * outputs_ema + 0.5 * model_ema(inputs.flip(-1))
+                acc_list_ema_tta.append((outputs_ema_tta.argmax(-1) == labels).float().mean())
+
+            val_acc = torch.stack(acc_list).mean().item()
+            val_loss = torch.stack(loss_list).mean().item()
+            ema_val_acc = torch.stack(acc_list_ema).mean().item()
+            tta_ema_val_acc = torch.stack(acc_list_ema_tta).mean().item()
+
+        print_training_details(locals(), is_final_entry=(epoch == epochs-1))
+        
+    return tta_ema_val_acc
+
+if __name__ == "__main__":
+    print_columns(logging_columns_list, column_heads_only=True)
+    accs = torch.tensor([main() for _ in range(10)])
+    print("Mean/std:", accs.mean().item(), accs.std().item())
 
