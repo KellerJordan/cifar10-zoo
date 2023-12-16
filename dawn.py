@@ -60,7 +60,7 @@ class PrepadCifarLoader:
         data = torch.load(data_path, map_location=torch.device(gpu))
         self.images, self.labels, self.classes = data['images'], data['labels'], data['classes']
         # It's faster to load+process uint8 data than to load preprocessed fp16 data
-        self.images = (self.images.half() / 255).permute(0, 3, 1, 2).to(memory_format=torch.channels_last)
+        self.images = (self.images.half() / 255).permute(0, 3, 1, 2)
 
         self.normalize = T.Normalize(CIFAR_MEAN, CIFAR_STD)
         self.denormalize = T.Normalize(-CIFAR_MEAN / CIFAR_STD, 1 / CIFAR_STD)
@@ -190,21 +190,22 @@ class GhostBatchNorm(BatchNorm):
 
     def train(self, mode=True):
         if (self.training is True) and (mode is False): #lazily collate stats when we are going to use them
-            self.running_mean = torch.mean(self.running_mean.view(self.num_splits, self.num_features), dim=0).repeat(self.num_splits)
-            self.running_var = torch.mean(self.running_var.view(self.num_splits, self.num_features), dim=0).repeat(self.num_splits)
+            self.running_mean = self.running_mean.view(self.num_splits, self.num_features).mean(0).repeat(self.num_splits)
+            self.running_var = self.running_var.view(self.num_splits, self.num_features).mean(0).repeat(self.num_splits)
         return super().train(mode)
-        
-    def forward(self, input):
-        N, C, H, W = input.shape
-        if self.training or not self.track_running_stats:
-            return F.batch_norm(
-                input.view(-1, C*self.num_splits, H, W), self.running_mean, self.running_var, 
-                self.weight.repeat(self.num_splits), self.bias.repeat(self.num_splits),
-                True, self.momentum, self.eps).view(N, C, H, W) 
+
+    def forward(self, inputs):
+        n, c, h, w = inputs.shape
+        if self.training:
+            return F.batch_norm(inputs.view(-1, c*self.num_splits, h, w),
+                                self.running_mean, self.running_var,
+                                self.weight.repeat(self.num_splits), self.bias.repeat(self.num_splits),
+                                True, self.momentum, self.eps).view(inputs.shape)
         else:
-            return F.batch_norm(
-                input, self.running_mean[:self.num_features], self.running_var[:self.num_features], 
-                self.weight, self.bias, False, self.momentum, self.eps)
+            return F.batch_norm(inputs,
+                                self.running_mean[:self.num_features], self.running_var[:self.num_features], 
+                                self.weight, self.bias,
+                                False, self.momentum, self.eps)
 
 class Residual(nn.Module):
     def __init__(self, module):
@@ -218,12 +219,11 @@ class Flatten(nn.Module):
         return x.view(len(x), -1)
     
 class Mul(nn.Module):
-        def __init__(self, weight):
-            super().__init__()
-            self.weight = weight
-        def forward(self, x): 
-            return x * self.weight
-
+    def __init__(self, weight):
+        super().__init__()
+        self.weight = weight
+    def forward(self, x): 
+        return x * self.weight
 
 def make_net():
 
