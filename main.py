@@ -186,29 +186,6 @@ class FastGlobalMaxPooling(nn.Module):
         return torch.amax(x, dim=(2,3))
 
 #############################################
-#          Init Helper Functions            #
-#############################################
-
-def get_patches(x, patch_shape):
-    c, (h, w) = x.shape[1], patch_shape
-    return x.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1,c,h,w).float()
-
-def get_whitening_parameters(patches):
-    n,c,h,w = patches.shape
-    patches_flat = patches.view(n, -1)
-    est_patch_covariance = (patches_flat.T @ patches_flat) / n
-    eigenvalues, eigenvectors = torch.linalg.eigh(est_patch_covariance, UPLO='U')
-    return eigenvalues.flip(0).view(-1, 1, 1, 1), eigenvectors.T.reshape(c*h*w,c,h,w).flip(0)
-
-# Note that this is a large epsilon, so the bottom half of principal directions won't fully whiten
-def init_whitening_conv(layer, train_set, eps=5e-4):
-    patches = get_patches(train_set, patch_shape=layer.weight.data.shape[2:])
-    eigenvalues, eigenvectors = get_whitening_parameters(patches)
-    eigenvectors_scaled = eigenvectors / torch.sqrt(eigenvalues + eps)
-    layer.weight.data[:] = torch.cat((eigenvectors_scaled, -eigenvectors_scaled))
-    layer.weight.requires_grad = False
-
-#############################################
 #            Network Definition             #
 #############################################
 
@@ -238,6 +215,29 @@ def make_net():
         if isinstance(mod, BatchNorm):
             mod.float()
     return net
+
+#############################################
+#          Init Helper Functions            #
+#############################################
+
+def get_patches(x, patch_shape):
+    c, (h, w) = x.shape[1], patch_shape
+    return x.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1,c,h,w).float()
+
+def get_whitening_parameters(patches):
+    n,c,h,w = patches.shape
+    patches_flat = patches.view(n, -1)
+    est_patch_covariance = (patches_flat.T @ patches_flat) / n
+    eigenvalues, eigenvectors = torch.linalg.eigh(est_patch_covariance, UPLO='U')
+    return eigenvalues.flip(0).view(-1, 1, 1, 1), eigenvectors.T.reshape(c*h*w,c,h,w).flip(0)
+
+# Note that this is a large epsilon, so the bottom half of principal directions won't fully whiten
+def init_whitening_conv(layer, train_set, eps=5e-4):
+    patches = get_patches(train_set, patch_shape=layer.weight.data.shape[2:])
+    eigenvalues, eigenvectors = get_whitening_parameters(patches)
+    eigenvectors_scaled = eigenvectors / torch.sqrt(eigenvalues + eps)
+    layer.weight.data[:] = torch.cat((eigenvectors_scaled, -eigenvectors_scaled))
+    layer.weight.requires_grad = False
 
 def init_net(net, train_images):
     init_whitening_conv(net[0], train_images)
@@ -476,13 +476,12 @@ def main(run):
 
     return tta_ema_val_acc
 
-
 if __name__ == "__main__":
     with open(sys.argv[0]) as f:
         code = f.read()
 
     print_columns(logging_columns_list, is_head=True)
-    accs = torch.tensor([main(run) for run in range(100)])
+    accs = torch.tensor([main(run) for run in range(25)])
     print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
     log = {'code': code, 'accs': accs}
