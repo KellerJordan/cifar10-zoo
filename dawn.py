@@ -100,7 +100,7 @@ class PrepadCifarLoader:
 
 from tqdm import tqdm
 
-####################
+#####################
 ## Timing and logging
 #####################
 
@@ -215,7 +215,7 @@ class Residual(nn.Module):
     
 class Flatten(nn.Module):
     def forward(self, x): 
-        return x.view(x.size(0), -1)
+        return x.view(len(x), -1)
     
 class Mul(nn.Module):
         def __init__(self, weight):
@@ -224,52 +224,37 @@ class Mul(nn.Module):
         def forward(self, x): 
             return x * self.weight
 
-def conv(in_channels, out_channels, kernel_size=3, padding=1):
-    return nn.Conv2d(in_channels, out_channels,
-                     kernel_size=kernel_size, stride=1, padding=padding, bias=False)
-
-act = nn.CELU(0.3)
-bn = lambda channels: GhostBatchNorm(channels, num_splits=16, weight=False)
 
 def make_net():
+
+    def conv(in_channels, out_channels, kernel_size=3, padding=1):
+        return nn.Conv2d(in_channels, out_channels,
+                         kernel_size=kernel_size, stride=1,
+                         padding=padding, bias=False)
+    act = nn.CELU(0.3)
+    bn = lambda channels: GhostBatchNorm(channels, num_splits=16, weight=False)
+
     net = nn.Sequential(
-        conv(3, 27),
+        conv(3, 27), # <-- this is the fixed whitening layer
         nn.Sequential(conv(27, 64, 1, 0), bn(64), act),
         nn.Sequential(conv(64, 128), nn.MaxPool2d(2), bn(128), act),
-        Residual(nn.Sequential(
-            conv(128, 128),
-            bn(128),
-            act,
-            conv(128, 128),
-            bn(128),
-            act,
-        )),
+        Residual(nn.Sequential(conv(128, 128), bn(128), act,
+                               conv(128, 128), bn(128), act)),
         nn.Sequential(conv(128, 256), nn.MaxPool2d(2), bn(256), act),
         nn.Sequential(conv(256, 512), nn.MaxPool2d(2), bn(512), act),
-        Residual(nn.Sequential(
-            conv(512, 512),
-            bn(512),
-            act,
-            conv(512, 512),
-            bn(512),
-            act,
-        )),
+        Residual(nn.Sequential(conv(512, 512), bn(512), act,
+                               conv(512, 512), bn(512), act)),
         nn.MaxPool2d(4),
         Flatten(),
         nn.Linear(512, 10, bias=False),
         Mul(1/16),
-    )
-    net = net.cuda().half()
+    ).cuda()
     
-    if True:
-        net[1][1].float()
-        net[2][2].float()
-        net[3].module[1].float()
-        net[3].module[4].float()
-        net[4][2].float()
-        net[5][2].float()
-        net[6].module[1].float()
-        net[6].module[4].float()
+    # convert conv/linear layers to fp16, leaving bn layers fp32
+    net.half()
+    for mod in net.modules():
+        if isinstance(mod, BatchNorm):
+            mod.float()
     
     return net
 
@@ -313,7 +298,7 @@ def main():
 
     epoch_logs = Table(report=lambda data: data['epoch'] % epochs == 0)
 
-    for run in range(25):
+    for run in range(50):
         
         model = make_net()
         train_images = train_loader.normalize(train_loader.images)[:10000]
