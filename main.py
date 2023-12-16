@@ -15,8 +15,6 @@ import torch.nn.functional as F
 
 torch.backends.cudnn.benchmark = True
 
-default_conv_kwargs = {'kernel_size': 3, 'padding': 'same', 'bias': False}
-
 hyp = {
     'opt': {
         'batch_size': 1024,
@@ -143,7 +141,6 @@ class PrepadCifarLoader:
 #            Network Components             #
 #############################################
 
-# We might be able to fuse this weight and save some memory/runtime/etc, since the fast version of the network might be able to do without somehow....
 class BatchNorm(nn.BatchNorm2d):
     def __init__(self, num_features, eps=1e-12, momentum=(1 - hyp['net']['batch_norm_momentum']),
                  weight=False, bias=True):
@@ -153,19 +150,13 @@ class BatchNorm(nn.BatchNorm2d):
         self.weight.requires_grad = weight
         self.bias.requires_grad = bias
 
-# Allows us to set default arguments for the whole convolution itself.
-# Having an outer class like this does add space and complexity but offers us
-# a ton of freedom when it comes to hacking in unique functionality for each layer type
 class Conv(nn.Conv2d):
-    def __init__(self, *args, **kwargs):
-        kwargs = {**default_conv_kwargs, **kwargs}
-        super().__init__(*args, **kwargs)
-        self.kwargs = kwargs
+    def __init__(self, in_channels, out_channels, kernel_size=3, padding='same', bias=False):
+        super().__init__(in_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=bias)
 
 class Linear(nn.Linear):
     def __init__(self, *args, temperature=None, **kwargs):
         super().__init__(*args, **kwargs)
-        self.kwargs = kwargs
         self.temperature = temperature
 
     def forward(self, x):
@@ -175,22 +166,15 @@ class Linear(nn.Linear):
             weight = self.weight
         return x @ weight.T
 
-# can hack any changes to each convolution group that you want directly in here
 class ConvGroup(nn.Module):
     def __init__(self, channels_in, channels_out):
         super().__init__()
-        self.channels_in  = channels_in
-        self.channels_out = channels_out
-
-        self.pool = nn.MaxPool2d(2)
         self.conv1 = Conv(channels_in,  channels_out)
-        self.conv2 = Conv(channels_out, channels_out)
-
+        self.pool = nn.MaxPool2d(2)
         self.norm1 = BatchNorm(channels_out)
+        self.conv2 = Conv(channels_out, channels_out)
         self.norm2 = BatchNorm(channels_out)
-
         self.activ = nn.GELU()
-
 
     def forward(self, x):
         x = self.conv1(x)
@@ -200,17 +184,12 @@ class ConvGroup(nn.Module):
         x = self.conv2(x)
         x = self.norm2(x)
         x = self.activ(x)
-
         return x
 
 class FastGlobalMaxPooling(nn.Module):
-    def __init__(self):
-        super().__init__()
-    
     def forward(self, x):
-        # Previously was chained torch.max calls.
-        # requires less time than AdaptiveMax2dPooling -- about ~.3s for the entire run, in fact (which is pretty significant! :O :D :O :O <3 <3 <3 <3)
-        return torch.amax(x, dim=(2,3)) # Global maximum pooling
+        # requires less time than AdaptiveMax2dPooling
+        return torch.amax(x, dim=(2,3))
 
 #############################################
 #          Init Helper Functions            #
@@ -250,14 +229,12 @@ def init_whitening_conv(layer, train_set, eps=5e-4):
 #            Network Definition             #
 #############################################
 
-scaler = 2. ## You can play with this on your own if you want, for the first beta I wanted to keep things simple (for now) and leave it out of the hyperparams dict
 depths = {
-    'block1': round(scaler**0 * hyp['net']['base_depth']), # 64  w/ scaler at base value
-    'block2': round(scaler**2 * hyp['net']['base_depth']), # 256 w/ scaler at base value
-    'block3': round(scaler**3 * hyp['net']['base_depth']), # 512 w/ scaler at base value
+    'block1': round(1 * hyp['net']['base_depth']), # 64  w/ scaler at base value
+    'block2': round(4 * hyp['net']['base_depth']), # 256 w/ scaler at base value
+    'block3': round(7 * hyp['net']['base_depth']), # 448 w/ scaler at base value
     'num_classes': 10
 }
-depths = {'block1': 64, 'block2': 256, 'block3': 448, 'num_classes': 10}
 
 class SpeedyConvNet(nn.Module):
     def __init__(self, network_dict):
@@ -387,9 +364,6 @@ def print_training_details(variables, is_final_entry):
 
 def main(run):
 
-    total_time_seconds = 0.
-    current_steps = 0.
-
     train_augs = dict(flip=True, translate=hyp['aug']['translate'])
     loss_fn = nn.CrossEntropyLoss(label_smoothing=0.2, reduction='none')
 
@@ -424,6 +398,9 @@ def main(run):
     ## For accurately timing GPU code
     starter = torch.cuda.Event(enable_timing=True)
     ender = torch.cuda.Event(enable_timing=True)
+
+    total_time_seconds = 0.
+    current_steps = 0.
 
     ## Initialize the whitening layer using training images
     starter.record()
@@ -551,7 +528,7 @@ if __name__ == "__main__":
         code = f.read()
 
     print_columns(logging_columns_list, is_head=True)
-    accs = torch.tensor([main(run) for run in range(20)])
+    accs = torch.tensor([main(run) for run in range(25)])
     print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
     log = {'code': code, 'accs': accs}
