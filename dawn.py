@@ -387,17 +387,17 @@ input_whitening_net = build_network(conv_pool_block=conv_pool_block_pre, prep_bl
 
 from tqdm import tqdm
 
-## original
+# original
 def nesterov_update(w, dw, v, lr, weight_decay, momentum):
     dw.add_(weight_decay, w).mul_(-lr) # this is happening too early.
     v.mul_(momentum).add_(dw)
     w.add_(dw.add_(momentum, v))
 
 ## correct
-# def nesterov_update(w, dw, v, lr, weight_decay, momentum):
-#     dw.add_(weight_decay, w)
-#     v.mul_(momentum).add_(dw)
-#     w.add_(-lr, dw.add_(momentum, v))
+#def nesterov_update(w, dw, v, lr, weight_decay, momentum):
+#    dw.add_(weight_decay, w)
+#    v.mul_(momentum).add_(dw)
+#    w.add_(-lr, dw.add_(momentum, v))
 
 class PiecewiseLinear(namedtuple('PiecewiseLinear', ('knots', 'vals'))):
     def __call__(self, t):
@@ -407,30 +407,31 @@ epochs = 10
 batch_size = 512
 ema_epochs = 2
 
-lr_schedule = lambda knots, vals, batch_size: PiecewiseLinear(np.array(knots)*len(train_loader),
-                                                              np.array(vals)/batch_size)
+loss_fn = nn.CrossEntropyLoss(label_smoothing=0.2, reduction='none')
 
 nonbias_wd = 5e-4*batch_size
 bias_wd = 5e-4*batch_size/64
 momentum = 0.9
+lr_schedule = lambda knots, vals, batch_size: PiecewiseLinear(np.array(knots)*len(train_loader),
+                                                              np.array(vals)/batch_size)
 nonbias_sched = lr_schedule([0, epochs/5, epochs - ema_epochs], [0.0, 1.0, 0.1], batch_size)
 bias_sched = lr_schedule([0, epochs/5, epochs - ema_epochs], [0.0, 1.0*64, 0.1*64], batch_size)
 
 epoch_logs = Table(report=lambda data: data['epoch'] % epochs == 0)
 
-for run in range(10):
-    
-    loss_fn = nn.CrossEntropyLoss(label_smoothing=0.2, reduction='none')
+for run in range(50):
     
     model = Network(input_whitening_net).half().cuda()
-    ema_model = copy.deepcopy(model)
     
+    ## optimizer state
     step = 0
     nonbias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' not in k]
     bias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' in k]
     nonbias_state = [torch.zeros_like(w) for w in nonbias_params]
     bias_state = [torch.zeros_like(w) for w in bias_params]
     
+    ## ema state
+    ema_model = copy.deepcopy(model)
     ema_momentum = 0.99
     update_freq = 5
     rho = ema_momentum**update_freq
@@ -441,14 +442,11 @@ for run in range(10):
     for epoch in tqdm(range(epochs)):
         
         logs = []
-        node_names = ('loss', 'acc')
-        
         model.train()
         for inputs, labels in train_loader:
             
             ## forward and logging
-            batch = {'input': inputs.half(), 'target': labels}
-            out = model(batch)
+            out = model({'input': inputs, 'target': labels})
             loss = loss_fn(out['logits'], labels)
             acc = (out['logits'].detach().argmax(1) == labels)
             logs.extend([('loss', loss), ('acc', acc)])
@@ -475,35 +473,32 @@ for run in range(10):
                     ema_v += (1-rho)*v
         
         train_summary = {k: torch.cat(xs).float().mean().item() for k, xs in group_by_key(logs).items()}
-        
         train_time = timer()
-        logs.clear()
 
+        logs = []
         ema_model.eval()
         for inputs, labels in test_loader:
-            batch = {'input': inputs.half(), 'target': labels}
-            
             with torch.no_grad():
-                inputs = batch['input']
                 logits = ema_model({'input': inputs})['logits']
                 logits_flip = ema_model({'input': inputs.flip(-1)})['logits']
                 logits_tta = (logits + logits_flip) / 2
-                
             loss = loss_fn(logits_tta, labels)
             acc = (logits_tta.argmax(1) == labels)
             logs.extend([('loss', loss), ('acc', acc)])
 
         valid_summary = {k: torch.cat(xs).float().mean().item() for k, xs in group_by_key(logs).items()}
-
         valid_time = timer(update_total=False)
-
+        
         log = {
             'train': {'time': train_time, **train_summary}, 
             'valid': {'time': valid_time, **valid_summary}, 
             'total time': timer.total_time
         }
-        
         epoch_logs.append({'run': run+1, 'epoch': epoch+1, **log})
 
+cols = ['valid_acc']
+summary = epoch_logs.df().query('epoch==epoch.max()')[cols].describe().transpose().astype({'count': int})[
+    ['count', 'mean', 'min', 'max', 'std']]
+print(summary)
 
 
