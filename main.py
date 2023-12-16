@@ -2,73 +2,45 @@
 #            Setup/Hyperparameters          #
 #############################################
 
+import os
 import sys
 import uuid
-import numpy as np
-
-from functools import partial
 import math
-import os
 import copy
+import numpy as np
 
 import torch
 from torch import nn
 import torch.nn.functional as F
 
-## <-- teaching comments
-# <-- functional comments
-# You can run 'sed -i.bak '/\#\#/d' ./main.py' to remove the teaching comments if they are in the way of your work. <3
-
-# This can go either way in terms of actually being helpful when it comes to execution speed.
 torch.backends.cudnn.benchmark = True
 
-# This code was built from the ground up to be directly hackable and to support rapid experimentation, which is something you might see
-# reflected in what would otherwise seem to be odd design decisions. It also means that maybe some cleaning up is required before moving
-# to production if you're going to use this code as such (such as breaking different section into unique files, etc). That said, if there's
-# ways this code could be improved and cleaned up, please do open a PR on the GitHub repo. Your support and help is much appreciated for this
-# project! :)
-
-
-# This is for testing that certain changes don't exceed some X% portion of the reference GPU (here an A100)
-# so we can help reduce a possibility that future releases don't take away the accessibility of this codebase.
-#torch.cuda.set_per_process_memory_fraction(fraction=6.5/40., device=0) ## 40. GB is the maximum memory of the base A100 GPU
-
-## These hyperparameters yield a mean accuracy between 94.004% and 94.030% (based on n=400 runs).
-
-# set global defaults (in this particular file) for convolutions
-default_conv_kwargs = {'kernel_size': 3, 'padding': 'same', 'bias': False}
-
-batchsize = 1024
-bias_scaler = 64
-# To replicate the ~95.79%-accuracy-in-110-seconds runs, you can change the base_depth from 64->128, train_epochs from 12.1->90, ['ema'] epochs 10->80, cutmix_size 3->10, and cutmix_epochs 6->80
 hyp = {
     'opt': {
-        'bias_lr':        1.525 * bias_scaler / 1024,
-        'non_bias_lr':    1.525 / 1024,
-        'bias_decay':     2 * 6.687e-4 * batchsize/bias_scaler,
-        'non_bias_decay': 2 * 6.687e-4 * batchsize,
-        'scaling_factor': 1./9,
-        'percent_start': .23,
-        'loss_scale': 32,
+        'batch_size': 1024,
+        'train_epochs': 10.0,
+        'lr': 1.525 / 1024,         # learning rate per example
+        'momentum': 0.85,
+        'weight_decay': 1.3374e-3,  # weight decay per exmaple
+        'bias_scaler': 64.0,        # how much to scale up the learning rate (but not weight decay) for BatchNorm biases
+        'scaling_factor': 1/9,
+    },
+    'aug': {
+        'translate': 2,
     },
     'net': {
         'whitening': {
             'kernel_size': 2,
         },
-        'pad_amount': 2,
-        'cutout_size': 0,
-        'batch_norm_momentum': .4, # * Don't forget momentum is 1 - momentum here (due to a quirk in the original paper... >:( )
-        'base_depth': 64 ## This should be a factor of 8 in some way to stay tensor core friendly
+        'batch_norm_momentum': 0.6,
+        'base_depth': 64,
     },
-    'misc': {
-        'ema': {
-            'start_epochs': 2,
-            'decay_base': .95,
-            'decay_pow': 3.,
-            'every_n_steps': 5,
-        },
-        'train_epochs': 10.0,
-    }
+    'ema': {
+        'start_epochs': 2,
+        'decay_base': 0.95,
+        'decay_pow': 3.,
+        'every_n_steps': 5,
+    },
 }
 
 #############################################
@@ -114,10 +86,6 @@ def batch_crop(inputs, crop_size):
     cropped_batch = torch.masked_select(inputs, crop_mask)
     return cropped_batch.view(inputs.shape[0], inputs.shape[1], crop_size, crop_size)
 
-def batch_cutout(inputs, size):
-    cutout_masks = make_random_square_masks(inputs, size)
-    return inputs.masked_fill(cutout_masks, 0)
-
 ## This is a pre-padded variant of quick_cifar.CifarLoader which moves the padding step of random translate
 ## from __iter__ to __init__, so that it doesn't need to be repeated each epoch.
 class PrepadCifarLoader:
@@ -140,7 +108,7 @@ class PrepadCifarLoader:
         
         self.aug = aug or {}
         for k in self.aug.keys():
-            assert k in ['flip', 'translate', 'cutout'], 'Unrecognized key: %s' % k
+            assert k in ['flip', 'translate'], 'Unrecognized key: %s' % k
 
         # Pre-pad images to save time when doing random translation
         pad = self.aug.get('translate', 0)
@@ -156,8 +124,6 @@ class PrepadCifarLoader:
             images = batch_crop(images, self.images.shape[-2])
         if self.aug.get('flip', False):
             images = batch_flip_lr(images)
-        if self.aug.get('cutout', 0) > 0:
-            images = batch_cutout(images, self.aug['cutout'])
         return images
 
     def __len__(self):
@@ -174,53 +140,35 @@ class PrepadCifarLoader:
 #            Network Components             #
 #############################################
 
-# We might be able to fuse this weight and save some memory/runtime/etc, since the fast version of the network might be able to do without somehow....
 class BatchNorm(nn.BatchNorm2d):
-    def __init__(self, num_features, eps=1e-12, momentum=hyp['net']['batch_norm_momentum'], weight=False, bias=True):
+    def __init__(self, num_features, eps=1e-12, momentum=(1 - hyp['net']['batch_norm_momentum']),
+                 weight=False, bias=True):
         super().__init__(num_features, eps=eps, momentum=momentum)
         self.weight.data.fill_(1.0)
         self.bias.data.fill_(0.0)
         self.weight.requires_grad = weight
         self.bias.requires_grad = bias
 
-# Allows us to set default arguments for the whole convolution itself.
-# Having an outer class like this does add space and complexity but offers us
-# a ton of freedom when it comes to hacking in unique functionality for each layer type
 class Conv(nn.Conv2d):
-    def __init__(self, *args, **kwargs):
-        kwargs = {**default_conv_kwargs, **kwargs}
-        super().__init__(*args, **kwargs)
-        self.kwargs = kwargs
+    def __init__(self, in_channels, out_channels, kernel_size=3, padding='same', bias=False):
+        super().__init__(in_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=bias)
 
-class Linear(nn.Linear):
-    def __init__(self, *args, temperature=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.kwargs = kwargs
+class Mul(nn.Module):
+    def __init__(self, temperature):
+        super().__init__()
         self.temperature = temperature
+    def forward(self, x): 
+        return x * self.temperature
 
-    def forward(self, x):
-        if self.temperature is not None:
-            weight = self.weight * self.temperature
-        else:
-            weight = self.weight
-        return x @ weight.T
-
-# can hack any changes to each convolution group that you want directly in here
 class ConvGroup(nn.Module):
     def __init__(self, channels_in, channels_out):
         super().__init__()
-        self.channels_in  = channels_in
-        self.channels_out = channels_out
-
-        self.pool = nn.MaxPool2d(2)
         self.conv1 = Conv(channels_in,  channels_out)
-        self.conv2 = Conv(channels_out, channels_out)
-
+        self.pool = nn.MaxPool2d(2)
         self.norm1 = BatchNorm(channels_out)
+        self.conv2 = Conv(channels_out, channels_out)
         self.norm2 = BatchNorm(channels_out)
-
         self.activ = nn.GELU()
-
 
     def forward(self, x):
         x = self.conv1(x)
@@ -230,135 +178,91 @@ class ConvGroup(nn.Module):
         x = self.conv2(x)
         x = self.norm2(x)
         x = self.activ(x)
-
         return x
 
 class FastGlobalMaxPooling(nn.Module):
-    def __init__(self):
-        super().__init__()
-    
     def forward(self, x):
-        # Previously was chained torch.max calls.
-        # requires less time than AdaptiveMax2dPooling -- about ~.3s for the entire run, in fact (which is pretty significant! :O :D :O :O <3 <3 <3 <3)
-        return torch.amax(x, dim=(2,3)) # Global maximum pooling
-
-#############################################
-#          Init Helper Functions            #
-#############################################
-
-def get_patches(x, patch_shape):
-    # This uses the unfold operation (https://pytorch.org/docs/stable/generated/torch.nn.functional.unfold.html?highlight=unfold#torch.nn.functional.unfold)
-    # to extract a _view_ (i.e., there's no data copied here) of blocks in the input tensor. We have to do it twice -- once horizontally, once vertically. Then
-    # from that, we get our kernel_size*kernel_size patches to later calculate the statistics for the whitening tensor on :D
-    c, (h, w) = x.shape[1], patch_shape
-    return x.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1,c,h,w).float()
-
-def get_whitening_parameters(patches):
-    # As a high-level summary, we're basically finding the high-dimensional oval that best fits the data here.
-    # We can then later use this information to map the input information to a nicely distributed sphere, where also
-    # the most significant features of the inputs each have their own axis. This significantly cleans things up for the
-    # rest of the neural network and speeds up training.
-    n,c,h,w = patches.shape
-    patches_flat = patches.view(n, -1)
-    est_patch_covariance = (patches_flat.T @ patches_flat) / n
-    eigenvalues, eigenvectors = torch.linalg.eigh(est_patch_covariance, UPLO='U')
-    return eigenvalues.flip(0).view(-1, 1, 1, 1), eigenvectors.T.reshape(c*h*w,c,h,w).flip(0)
-
-# Run this over the training set to calculate the patch statistics, then set the initial convolution as a non-learnable 'whitening' layer
-# Note that this is a large epsilon, so the bottom half of principal directions won't fully whiten
-def init_whitening_conv(layer, train_set, eps=5e-4):
-    patches = get_patches(train_set, patch_shape=layer.weight.data.shape[2:])
-    eigenvalues, eigenvectors = get_whitening_parameters(patches)
-    eigenvectors_scaled = eigenvectors/torch.sqrt(eigenvalues+eps) # set the filters as the eigenvectors in order to whiten inputs
-    eigenvectors_scaled_truncated = eigenvectors_scaled[:len(layer.weight)//2]
-    layer.weight.data[:] = torch.cat((eigenvectors_scaled_truncated, -eigenvectors_scaled_truncated))
-    ## We don't want to train this, since this is implicitly whitening over the whole dataset
-    ## For more info, see David Page's original blogposts (link in the README.md as of this commit.)
-    layer.weight.requires_grad = False
+        # requires less time than AdaptiveMax2dPooling
+        return torch.amax(x, dim=(2,3))
 
 #############################################
 #            Network Definition             #
 #############################################
 
 depths = {
-    'block1': round(1 * hyp['net']['base_depth']), # 64  w/ scaler at base value
-    'block2': round(4 * hyp['net']['base_depth']), # 256 w/ scaler at base value
-    'block3': round(7 * hyp['net']['base_depth']), # 448 w/ scaler at base value
+    'block1': (1 * hyp['net']['base_depth']), # 64  w/ depth at base value
+    'block2': (4 * hyp['net']['base_depth']), # 256 w/ depth at base value
+    'block3': (7 * hyp['net']['base_depth']), # 448 w/ depth at base value
     'num_classes': 10
 }
 
-class SpeedyConvNet(nn.Module):
-    def __init__(self, network_dict):
-        super().__init__()
-        self.net_dict = network_dict # flexible, defined in the make_net function
-
-    # This allows you to customize/change the execution order of the network as needed.
-    def forward(self, x):
-        x = self.net_dict['initial_block']['whiten'](x)
-        x = self.net_dict['initial_block']['activation'](x)
-        x = self.net_dict['conv_group_1'](x)
-        x = self.net_dict['conv_group_2'](x)
-        x = self.net_dict['conv_group_3'](x)
-        x = self.net_dict['pooling'](x)
-        x = self.net_dict['linear'](x)
-        return x
-
 def make_net():
     whiten_conv_depth = 2 * 3 * hyp['net']['whitening']['kernel_size']**2
-    network_dict = nn.ModuleDict({
-        'initial_block': nn.ModuleDict({
-            'whiten': Conv(3, whiten_conv_depth, kernel_size=hyp['net']['whitening']['kernel_size'], padding=0),
-            'activation': nn.GELU(),
-        }),
-        'conv_group_1': ConvGroup(whiten_conv_depth, depths['block1']),
-        'conv_group_2': ConvGroup(depths['block1'],  depths['block2']),
-        'conv_group_3': ConvGroup(depths['block2'],  depths['block3']),
-        'pooling': FastGlobalMaxPooling(),
-        'linear': Linear(depths['block3'], depths['num_classes'], bias=False, temperature=hyp['opt']['scaling_factor']),
-    })
-
-    net = SpeedyConvNet(network_dict)
+    net = nn.Sequential(
+        Conv(3, whiten_conv_depth, kernel_size=hyp['net']['whitening']['kernel_size'], padding=0),
+        nn.GELU(),
+        ConvGroup(whiten_conv_depth, depths['block1']),
+        ConvGroup(depths['block1'],  depths['block2']),
+        ConvGroup(depths['block2'],  depths['block3']),
+        FastGlobalMaxPooling(),
+        nn.Linear(depths['block3'], depths['num_classes'], bias=False),
+        Mul(hyp['opt']['scaling_factor']),
+    )
     net = net.cuda()
-    net = net.to(memory_format=torch.channels_last) # to appropriately use tensor cores/avoid thrash while training
-    net.train()
-    net.half() # Convert network to half before initializing the initial whitening layer.
+    net = net.to(memory_format=torch.channels_last)
+    net.half()
+    for mod in net.modules():
+        if isinstance(mod, BatchNorm):
+            mod.float()
     return net
 
+#############################################
+#          Init Helper Functions            #
+#############################################
+
+def get_patches(x, patch_shape):
+    c, (h, w) = x.shape[1], patch_shape
+    return x.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1,c,h,w).float()
+
+def get_whitening_parameters(patches):
+    n,c,h,w = patches.shape
+    patches_flat = patches.view(n, -1)
+    est_patch_covariance = (patches_flat.T @ patches_flat) / n
+    eigenvalues, eigenvectors = torch.linalg.eigh(est_patch_covariance, UPLO='U')
+    return eigenvalues.flip(0).view(-1, 1, 1, 1), eigenvectors.T.reshape(c*h*w,c,h,w).flip(0)
+
+# Note that this is a large epsilon, so the bottom half of principal directions won't fully whiten
+def init_whitening_conv(layer, train_set, eps=5e-4):
+    patches = get_patches(train_set, patch_shape=layer.weight.data.shape[2:])
+    eigenvalues, eigenvectors = get_whitening_parameters(patches)
+    eigenvectors_scaled = eigenvectors / torch.sqrt(eigenvalues + eps)
+    layer.weight.data[:] = torch.cat((eigenvectors_scaled, -eigenvectors_scaled))
+    layer.weight.requires_grad = False
+
 def init_net(net, train_images):
+    init_whitening_conv(net[0], train_images)
+    for block in net[2:5]:
+        # Create an implicit residual via a dirac-initialized tensor
+        dirac_weights_in = torch.nn.init.dirac_(torch.empty_like(block.conv1.weight))
 
-    with torch.no_grad():
-        init_whitening_conv(net.net_dict['initial_block']['whiten'],
-                            train_images[:5000])
+        # Add the implicit residual to the already-initialized convolutional transition layer.
+        # One can use more sophisticated initializations, but this one appeared worked best in testing.
+        # What this does is brings up the features from the previous residual block virtually, so not only 
+        # do we have residual information flow within each block, we have a nearly direct connection from
+        # the early layers of the network to the loss function.
+        std_pre, mean_pre = torch.std_mean(block.conv1.weight.data)
+        block.conv1.weight.data = block.conv1.weight.data + dirac_weights_in 
+        std_post, mean_post = torch.std_mean(block.conv1.weight.data)
 
-        for name, block in net.net_dict.items():
-            if 'conv_group' in name:
-                # Create an implicit residual via a dirac-initialized tensor
-                dirac_weights_in = torch.nn.init.dirac_(torch.empty_like(block.conv1.weight))
+        # Renormalize the weights to match the original initialization statistics
+        block.conv1.weight.data.sub_(mean_post).div_(std_post).mul_(std_pre).add_(mean_pre)
 
-                # Add the implicit residual to the already-initialized convolutional transition layer.
-                # One can use more sophisticated initializations, but this one appeared worked best in testing.
-                # What this does is brings up the features from the previous residual block virtually, so not only 
-                # do we have residual information flow within each block, we have a nearly direct connection from
-                # the early layers of the network to the loss function.
-                std_pre, mean_pre = torch.std_mean(block.conv1.weight.data)
-                block.conv1.weight.data = block.conv1.weight.data + dirac_weights_in 
-                std_post, mean_post = torch.std_mean(block.conv1.weight.data)
-
-                # Renormalize the weights to match the original initialization statistics
-                block.conv1.weight.data.sub_(mean_post).div_(std_post).mul_(std_pre).add_(mean_pre)
-
-                ## We do the same for the second layer in each convolution group block, since this only
-                ## adds a simple multiplier to the inputs instead of the noise of a randomly-initialized
-                ## convolution. This can be easily scaled down by the network, and the weights can more easily
-                ## pivot in whichever direction they need to go now.
-                ## The reason that I believe that this works so well is because a combination of MaxPool2d
-                ## and the nn.GeLU function's positive bias encouraging values towards the nearly-linear
-                ## region of the GeLU activation function at network initialization. I am not currently
-                ## sure about this, however, it will require some more investigation. For now -- it works! D:
-                torch.nn.init.dirac_(block.conv2.weight)
+        ## We do the same for the second layer in each convolution group block; this only adds a
+        ## simple multiplier to the inputs instead of the noise of a randomly-initialized convolution.
+        torch.nn.init.dirac_(block.conv2.weight)
 
 ########################################
-#          Training Helpers            #
+#                 EMA                  #
 ########################################
 
 class NetworkEMA(nn.Module):
@@ -370,139 +274,125 @@ class NetworkEMA(nn.Module):
         with torch.no_grad():
             for net_ema_param, (param_name, net_param) in zip(self.net_ema.state_dict().values(), net.state_dict().items()):
                 if net_param.dtype in (torch.half, torch.float):
-                    net_ema_param.lerp_(net_param.detach(), 1-decay) # linear interpolation
+                    net_ema_param.lerp_(net_param.detach(), 1-decay)
                     # And then we also copy the parameters back to the network, similarly to the Lookahead optimizer (but with a much more aggressive-at-the-end schedule)
-                    #if not ('norm' in param_name and 'weight' in param_name) and not 'whiten' in param_name:
                     if not 'whiten' in param_name:
                         net_param.copy_(net_ema_param.detach())
 
     def forward(self, inputs):
         return self.net_ema(inputs)
 
-def init_split_parameter_dictionaries(network):
-    loss_scale = hyp['opt']['loss_scale']
-    wd_nonbias = hyp['opt']['non_bias_decay'] * loss_scale
-    wd_bias = hyp['opt']['bias_decay'] * loss_scale
-    lr_nonbias = hyp['opt']['non_bias_lr'] / loss_scale
-    lr_bias = hyp['opt']['bias_lr'] / loss_scale
-    hyp_nonbias = {'params': [], 'lr': lr_nonbias, 'momentum': .85, 'nesterov': True, 'weight_decay': wd_nonbias}
-    hyp_bias    = {'params': [], 'lr': lr_bias,    'momentum': .85, 'nesterov': True, 'weight_decay': wd_bias}
-    for name, p in network.named_parameters():
-        if p.requires_grad:
-            if 'bias' in name:
-                hyp_bias['params'].append(p)
-            else:
-                hyp_nonbias['params'].append(p)
-    return hyp_nonbias, hyp_bias
+########################################
+#               Logging                #
+########################################
 
-def print_columns(columns_list, separator_left='|  ', separator_right='  ', final="|", column_heads_only=False, is_final_entry=False):
-    print_string = ""
-    if column_heads_only:
-        for column_head_name in columns_list:
-            print_string += separator_left + column_head_name + separator_right
-        print_string += final
-        print('-'*(len(print_string))) # print the top bar
-        print(print_string)
-        print('-'*(len(print_string))) # print the bottom bar
-    else:
-        for column_value in columns_list:
-            print_string += separator_left + column_value + separator_right
-        print_string += final
-        print(print_string)
-    if is_final_entry:
-        print('-'*(len(print_string))) # print the final output bar
+def print_columns(columns_list, is_head=False, is_final_entry=False):
+    print_string = ''
+    for col in columns_list:
+        print_string += '|  %s  ' % col 
+    print_string += '|' 
+    if is_head:
+        print('-'*len(print_string))
+    print(print_string)
+    if is_head or is_final_entry:
+        print('-'*len(print_string))
 
-logging_columns_list = ['epoch', 'train_loss', 'val_loss', 'train_acc', 'val_acc', 'ema_val_acc', 'tta_ema_val_acc', 'total_time_seconds']
+logging_columns_list = ['run', 'epoch', 'train_loss', 'val_loss', 'train_acc', 'val_acc', 'ema_val_acc', 'tta_ema_val_acc', 'total_time_seconds']
 def print_training_details(variables, is_final_entry):
-    # We basically need to look up local variables by name so we can have the names, so we can pad to the proper column width.
-    ## Printing stuff in the terminal can get tricky and this used to use an outside library, but some of the required stuff seemed even
-    ## more heinous than this, unfortunately. So we switched to the "more simple" version of this!
-    format_for_table = lambda x, variables: (f"{variables[x]}".rjust(len(x))) \
-                       if type(variables[x]) in (int, str) else "{:0.4f}".format(variables[x]).rjust(len(x)) \
-                       if variables[x] is not None \
-                       else " "*len(x)
-    print_columns(list(map(partial(format_for_table, variables=variables), logging_columns_list)),
-                           is_final_entry=is_final_entry)
+    formatted = []
+    for col in logging_columns_list:
+        var = variables[col]
+        if type(var) in (int, str):
+            res = str(var)
+        elif type(var) is float:
+            res = '{:0.4f}'.format(var)
+        else:
+            assert var is None
+            res = ''
+        formatted.append(res.rjust(len(col)))
+    print_columns(formatted, is_final_entry=is_final_entry)
 
 ########################################
 #           Train and Eval             #
 ########################################
 
-def main():
-    # Initializing constants for the whole run.
-    net_ema = None
+def main(run):
 
-    total_time_seconds = 0.
-    current_steps = 0.
+    batch_size = hyp['opt']['batch_size']
+    epochs = hyp['opt']['train_epochs']
+    lr = hyp['opt']['lr']
+    momentum = hyp['opt']['momentum']
+    wd = hyp['opt']['weight_decay']
+    bias_scaler = hyp['opt']['bias_scaler']
 
-    train_augs = dict(flip=True, translate=hyp['net']['pad_amount'], cutout=hyp['net']['cutout_size'])
-    train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=batchsize, aug=train_augs)
+    train_augs = dict(flip=True, translate=hyp['aug']['translate'])
+    loss_fn = nn.CrossEntropyLoss(label_smoothing=0.2, reduction='none')
+
+    train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=batch_size, aug=train_augs)
     test_loader = PrepadCifarLoader('/tmp/cifar10', train=False, batch_size=2000)
 
+    total_train_steps = math.ceil(len(train_loader) * epochs)
+    lr_schedule = np.interp(np.arange(1+total_train_steps),
+                            [0, int(0.23 * total_train_steps), total_train_steps],
+                            [0.2, 1, 0.07]) 
+
+    loss_scale = 32.
+    scaled_lr = (lr / loss_scale)
+    scaled_wd = (wd * loss_scale * batch_size)
+
+    model = make_net()
+    model_ema = None
+    current_steps = 0
+
+    nonbias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' not in k]
+    bias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' in k]
+    hyp_nonbias = dict(params=nonbias_params, lr=scaled_lr, weight_decay=scaled_wd)
+    hyp_bias = dict(params=bias_params, lr=scaled_lr*bias_scaler, weight_decay=scaled_wd/bias_scaler)
+    optimizer = torch.optim.SGD([hyp_nonbias, hyp_bias], momentum=momentum, nesterov=True)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule.__getitem__)
+
     ## For accurately timing GPU code
-    starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+    starter = torch.cuda.Event(enable_timing=True)
+    ender = torch.cuda.Event(enable_timing=True)
 
-    # Get network
-    net = make_net()
+    total_time_seconds = 0.0
 
+    ## Initialize the whitening layer using training images
     starter.record()
-    train_images = train_loader.normalize(train_loader.images)
-    init_net(net, train_images)
+    train_images = train_loader.normalize(train_loader.images[:5000])
+    init_net(model, train_images)
     ender.record()
     torch.cuda.synchronize()
     total_time_seconds += 1e-3 * starter.elapsed_time(ender)
 
-    # Loss function is smoothed cross-entropy
-    loss_fn = nn.CrossEntropyLoss(label_smoothing=0.2, reduction='none')
+    for epoch in range(math.ceil(epochs)):
 
-    # One optimizer for the regular network, and one for the biases.
-    non_bias_params, bias_params = init_split_parameter_dictionaries(net)
-    opt = torch.optim.SGD([non_bias_params, bias_params])
-
-    # Learning rate and EMA scheduling
-    total_train_steps = math.ceil(len(train_loader) * hyp['misc']['train_epochs'])
-    # Adjust pct_start based upon how many epochs we need to finetune the ema at a low lr for
-    pct_start = hyp['opt']['percent_start'] #* (total_train_steps/(total_train_steps - num_low_lr_steps_for_ema))
-    final_lr_ratio = .07 # Actually pretty important, apparently!
-    lr_schedule = np.interp(np.arange(1+total_train_steps),
-                            [0, int(pct_start * total_train_steps), total_train_steps],
-                            [0.2, 1, final_lr_ratio]) 
-    lr_sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_schedule.__getitem__)
-
-    ## I believe this wasn't logged, but the EMA update power is adjusted by being raised to the power of the number of "every n" steps
-    ## to somewhat accomodate for whatever the expected information intake rate is. The tradeoff I believe, though, is that this is to some degree noisier as we
-    ## are intaking fewer samples of our distribution-over-time, with a higher individual weight each. This can be good or bad depending upon what we want.
-    projected_ema_decay_val  = hyp['misc']['ema']['decay_base'] ** hyp['misc']['ema']['every_n_steps']
-
-    for epoch in range(math.ceil(hyp['misc']['train_epochs'])):
-
-        #################
-        # Training Mode #
-        #################
+        ####################
+        #     Training     #
+        ####################
 
         starter.record()
-        net.train()
 
+        model.train()
         for inputs, labels in train_loader:
 
-            outputs = net(inputs)
+            outputs = model(inputs)
             loss = loss_fn(outputs, labels).sum()
-            loss_scaled = hyp['opt']['loss_scale'] * loss
-            loss_scaled.backward()
-
-            opt.step()
-            opt.zero_grad(set_to_none=True)
-            lr_sched.step()
+            optimizer.zero_grad(set_to_none=True)
+            (loss_scale * loss).backward()
+            optimizer.step()
+            scheduler.step()
 
             current_steps += 1
 
-            if epoch >= hyp['misc']['ema']['start_epochs'] and current_steps % hyp['misc']['ema']['every_n_steps'] == 0:          
-                ## Initialize the ema from the network at this point in time if it does not already exist.... :D
-                if net_ema is None: # don't snapshot the network yet if so!
-                    net_ema = NetworkEMA(net)
+            if epoch >= hyp['ema']['start_epochs'] and current_steps % hyp['ema']['every_n_steps'] == 0:          
+                if model_ema is None:
+                    model_ema = NetworkEMA(model)
                 else:
-                    # We warm up our ema's decay/momentum value over training exponentially according to the hyp config dictionary (this lets us move fast, then average strongly at the end).
-                    net_ema.update(net, decay=projected_ema_decay_val*(current_steps/total_train_steps)**hyp['misc']['ema']['decay_pow'])
+                    # We warm up our ema's decay/momentum value over training (this lets us move fast, then average strongly at the end).
+                    base_rho = hyp['ema']['decay_base'] ** hyp['ema']['every_n_steps']
+                    rho = base_rho * (current_steps / total_train_steps) ** hyp['ema']['decay_pow']
+                    model_ema.update(model, decay=rho)
 
             if current_steps >= total_train_steps:
                 break
@@ -512,93 +402,89 @@ def main():
         total_time_seconds += 1e-3 * starter.elapsed_time(ender)
         
         ####################
-        # Evaluation  Mode #
+        #    Evaluation    #
         ####################
 
-        ## Get the accuracy and loss of the last batch of training data
-        train_acc = (outputs.detach().argmax(-1) == labels).float().mean().item()
-        train_loss = loss.item() / batchsize
+        # save the accuracy and loss from the last training batch of the epoch
+        train_acc = (outputs.detach().argmax(1) == labels).float().mean().item()
+        train_loss = loss.item() / batch_size
 
-        net.eval()
+        model.eval()
         with torch.no_grad():
             loss_list, acc_list, acc_list_ema = [], [], []
             for inputs, labels in test_loader:
-                outputs = net(inputs)
+                outputs = model(inputs)
                 loss_list.append(loss_fn(outputs, labels).float().mean())
-                acc_list.append((outputs.argmax(-1) == labels).float().mean())
-                if net_ema:
-                    outputs = net_ema(inputs)
-                    acc_list_ema.append((outputs.argmax(-1) == labels).float().mean())
+                acc_list.append((outputs.argmax(1) == labels).float().mean())
+                if model_ema:
+                    outputs = model_ema(inputs)
+                    acc_list_ema.append((outputs.argmax(1) == labels).float().mean())
             val_acc = torch.stack(acc_list).mean().item()
             val_loss = torch.stack(loss_list).mean().item()
             ema_val_acc = None
-            if net_ema:
+            if model_ema:
                 ema_val_acc = torch.stack(acc_list_ema).mean().item()
         tta_ema_val_acc = None
 
         print_training_details(locals(), is_final_entry=False)
+        run = None # Only print the run number once
 
     ####################
     #  TTA Evaluation  #
     ####################
 
+    starter.record()
+
     with torch.no_grad():
 
         ## Test-time augmentation strategy:
-        ## 1. Flip (mirror) the image left-to-right (50% of the time).
-        ## 2. Then jitter the image by one pixel (50% of the time, i.e. both happen 25% of the time).
+        ## 1. Flip (/"mirror") the image left-to-right (50% of the time).
+        ## 2. Translate (/"jitter") the image by one pixel in any direction (50% of the time, i.e. both happen 25% of the time).
         ##
         ## This creates 8 inputs per image (left/right times the four directions),
         ## which we evaluate and then weight according to the given probabilities.
 
-        assert net_ema
-
-        starter.record()
+        test_images = test_loader.normalize(test_loader.images)
+        test_labels = test_loader.labels
 
         pad = 1
-        padded_images = F.pad(test_loader.images, (pad,)*4, 'reflect')
-        images = [test_loader.images]
-        images.append(padded_images[:, :, 0:32, 0:32])
-        images.append(padded_images[:, :, 0:32, 2:34])
-        images.append(padded_images[:, :, 2:34, 0:32])
-        images.append(padded_images[:, :, 2:34, 2:34])
-        images_tta = test_loader.normalize(torch.cat(images))
-        labels = test_loader.labels
-
+        padded_images = F.pad(test_images, (pad,)*4, 'reflect')
+        images_tta = torch.cat([
+            test_images,
+            padded_images[:, :, 0:32, 0:32],
+            padded_images[:, :, 0:32, 2:34],
+            padded_images[:, :, 2:34, 0:32],
+            padded_images[:, :, 2:34, 2:34],
+        ])
         outputs_list = []
         for inputs in images_tta.split(2000):
-            outputs = (0.5 * net_ema(inputs) + 0.5 * net_ema(inputs.flip(-1)))
+            outputs = 0.5 * model_ema(inputs) + 0.5 * model_ema(inputs.flip(-1))
             outputs_list.append(outputs)
-        outputs = torch.cat(outputs_list)
-        outputs = outputs.view(-1, len(labels), 10)
+        outputs = torch.cat(outputs_list).view(-1, len(test_labels), 10)
         
         logits_mirror = outputs[0]
         logits_mirror_jitter = outputs[1:].mean(0)
         logits_tta = (0.5 * logits_mirror + 0.5 * logits_mirror_jitter)
+        tta_ema_val_acc = (logits_tta.argmax(1) == test_labels).float().mean().item()
 
-        tta_ema_val_acc = (logits_tta.argmax(1) == labels).float().mean().item()
-
-        ender.record()
-        torch.cuda.synchronize()
-        total_time_seconds += 1e-3 * starter.elapsed_time(ender)
+    ender.record()
+    torch.cuda.synchronize()
+    total_time_seconds += 1e-3 * starter.elapsed_time(ender)
 
     epoch = 'eval'
     print_training_details(locals(), is_final_entry=True)
 
     return tta_ema_val_acc
 
-
 if __name__ == "__main__":
     with open(sys.argv[0]) as f:
         code = f.read()
 
-    print_columns(logging_columns_list, column_heads_only=True)
-    acc_list = []
-    for run_num in range(25):
-        acc_list.append(torch.tensor(main()))
-    print("Mean/std:", (torch.mean(torch.stack(acc_list)).item(), torch.std(torch.stack(acc_list)).item()))
+    print_columns(logging_columns_list, is_head=True)
+    accs = torch.tensor([main(run) for run in range(25)])
+    print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
-    log = {'code': code, 'accs': acc_list}
+    log = {'code': code, 'accs': accs}
     log_dir = os.path.join('logs', str(uuid.uuid4()))
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(log_dir, 'log.pt')
