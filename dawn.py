@@ -283,23 +283,21 @@ def eigens(patches):
     
     patches_flat = patches.reshape(n, c*h*w)
     cov = (patches_flat.T @ patches_flat) / (n - 1)
-    eigenvalues,eigenvectors = torch.linalg.eigh(cov, UPLO='U')
+    eigenvalues, eigenvectors = torch.linalg.eigh(cov, UPLO='U')
     
     return eigenvalues.flip(0), eigenvectors.T.reshape(c*h*w, c, h, w).flip(0)
 
-train_loader = PrepadCifarLoader('/tmp/cifar10', train=True)
-train_images = train_loader.normalize(train_loader.images)[:10000]
-eigenvalues, eigenvectors = eigens(patches(train_images))
-
-def whitening_conv(eps=1e-2):
+def whitening_conv(train_images, eps=1e-2):
+    eigenvalues, eigenvectors = eigens(patches(train_images))
     weight = eigenvectors / (eigenvalues+eps).sqrt()[:, None, None, None]
+
     filt = nn.Conv2d(3, 27, kernel_size=(3,3), padding=(1,1), bias=False)
-    filt.weight.data[:] = weight.half()
+    filt.weight.data[:] = weight
     filt.weight.requires_grad = False
     return filt
 
 def init_net(net, train_images):
-    whiten_conv = whitening_conv()
+    whiten_conv = whitening_conv(train_images)
     net[0] = whiten_conv.half().cuda()
 
 def main():
