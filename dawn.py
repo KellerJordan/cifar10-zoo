@@ -1,3 +1,12 @@
+import copy
+from itertools import count
+import numpy as np
+import torch
+from torch import nn
+import torch.nn.functional as F
+
+torch.backends.cudnn.benchmark = True
+
 #############################################
 #                DataLoader                 #
 #############################################
@@ -97,20 +106,9 @@ class PrepadCifarLoader:
             idxs = indices[i*self.batch_size:(i+1)*self.batch_size]
             yield (images[idxs], self.labels[idxs])
 
-
-import copy
-from itertools import count
-
 #############################################
 #            Network Components             #
 #############################################
-
-import numpy as np
-import torch
-from torch import nn
-import torch.nn.functional as F
-
-torch.backends.cudnn.benchmark = True
 
 class BatchNorm(nn.BatchNorm2d):
     def __init__(self, num_features, eps=1e-05, momentum=0.1, weight=True, bias=True):
@@ -253,14 +251,18 @@ def main(run):
 
     epochs = 10
     batch_size = 512
-    ema_epochs = 2
 
     lr = 1.0 / 512
     momentum = 0.9
     wd = 5e-4 * 512
     bias_scaler = 64
-    train_aug = dict(flip=True, translate=4)
     loss_fn = nn.CrossEntropyLoss(label_smoothing=0.2, reduction='none')
+
+    train_aug = dict(flip=True, translate=4)
+
+    ema_epochs = 2
+    ema_momentum = 0.99
+    ema_update_freq = 5
 
     train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=batch_size, aug=train_aug)
     test_loader = PrepadCifarLoader('/tmp/cifar10', train=False, batch_size=1000)
@@ -270,7 +272,8 @@ def main(run):
                       [0, 2*len(train_loader), (epochs-ema_epochs)*len(train_loader), total_train_steps],
                       [0, 1, 0.1, 0.1])
 
-    starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+    starter = torch.cuda.Event(enable_timing=True)
+    ender = torch.cuda.Event(enable_timing=True)
     total_time_seconds = 0
 
     model = make_net()
@@ -288,9 +291,6 @@ def main(run):
     
     ## ema setup
     model_ema = copy.deepcopy(model)
-    ema_momentum = 0.99
-    update_freq = 5
-    rho = ema_momentum**update_freq
     iter_counter = count()
     
     for epoch in range(epochs):
@@ -311,10 +311,10 @@ def main(run):
             optimizer.step()
             scheduler.step()
             
-            ## ema update
-            if next(iter_counter) % update_freq == 0:
+            if next(iter_counter) % ema_update_freq == 0:
                 for (k, v), ema_v in zip(model.state_dict().items(), model_ema.state_dict().values()):
                     if 'num_batches_tracked' not in k:
+                        rho = ema_momentum**ema_update_freq
                         ema_v.lerp_(v, 1-rho)
         
         ender.record()
@@ -325,7 +325,7 @@ def main(run):
         #    Evaluation    #
         ####################
 
-        ## the accuracy and loss from the last batch of training data in the epoch
+        ## save the accuracy and loss from the last training batch of the epoch
         train_acc = (outputs.detach().argmax(-1) == labels).float().mean().item()
         train_loss = loss.item() / batch_size
 
@@ -355,6 +355,7 @@ def main(run):
         run = None # don't print run after first iteration
         
     return tta_ema_val_acc
+
 
 if __name__ == '__main__':
     print_columns(logging_columns_list, is_head=True)
