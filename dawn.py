@@ -387,18 +387,6 @@ input_whitening_net = build_network(conv_pool_block=conv_pool_block_pre, prep_bl
 
 from tqdm import tqdm
 
-# original
-def nesterov_update(w, dw, v, lr, weight_decay, momentum):
-    dw.add_(weight_decay, w).mul_(-lr) # this is happening too early.
-    v.mul_(momentum).add_(dw)
-    w.add_(dw.add_(momentum, v))
-
-## correct
-#def nesterov_update(w, dw, v, lr, weight_decay, momentum):
-#    dw.add_(weight_decay, w)
-#    v.mul_(momentum).add_(dw)
-#    w.add_(-lr, dw.add_(momentum, v))
-
 class PiecewiseLinear(namedtuple('PiecewiseLinear', ('knots', 'vals'))):
     def __call__(self, t):
         return np.interp([t], self.knots, self.vals)[0]
@@ -419,16 +407,17 @@ bias_sched = lr_schedule([0, epochs/5, epochs - ema_epochs], [0.0, 1.0*64, 0.1*6
 
 epoch_logs = Table(report=lambda data: data['epoch'] % epochs == 0)
 
-for run in range(50):
+for run in range(5):
     
     model = Network(input_whitening_net).half().cuda()
     
     ## optimizer state
-    step = 0
     nonbias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' not in k]
     bias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' in k]
-    nonbias_state = [torch.zeros_like(w) for w in nonbias_params]
-    bias_state = [torch.zeros_like(w) for w in bias_params]
+    nonbias_opt = torch.optim.SGD(nonbias_params, lr=1.0, weight_decay=nonbias_wd, momentum=0.9, nesterov=True)
+    nonbias_scheduler = torch.optim.lr_scheduler.LambdaLR(nonbias_opt, nonbias_sched.__call__)
+    bias_opt = torch.optim.SGD(bias_params, lr=1.0, weight_decay=bias_wd, momentum=0.9, nesterov=True)
+    bias_scheduler = torch.optim.lr_scheduler.LambdaLR(bias_opt, bias_sched.__call__)
     
     ## ema state
     ema_model = copy.deepcopy(model)
@@ -456,13 +445,10 @@ for run in range(50):
             loss.sum().backward()
             
             ## optimizer step
-            step += 1
-            nonbias_lr = nonbias_sched(step)
-            bias_lr = bias_sched(step)
-            for w, v in zip(nonbias_params, nonbias_state):
-                nesterov_update(w.data, w.grad, v, nonbias_lr, nonbias_wd, momentum)
-            for w, v in zip(bias_params, bias_state):
-                nesterov_update(w.data, w.grad, v, bias_lr, bias_wd, momentum)
+            nonbias_scheduler.step()
+            nonbias_opt.step()
+            bias_scheduler.step()
+            bias_opt.step()
             
             ## ema update
             if next(iter_counter) % update_freq == 0:
@@ -495,10 +481,4 @@ for run in range(50):
             'total time': timer.total_time
         }
         epoch_logs.append({'run': run+1, 'epoch': epoch+1, **log})
-
-cols = ['valid_acc']
-summary = epoch_logs.df().query('epoch==epoch.max()')[cols].describe().transpose().astype({'count': int})[
-    ['count', 'mean', 'min', 'max', 'std']]
-print(summary)
-
 
