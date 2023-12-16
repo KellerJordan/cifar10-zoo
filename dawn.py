@@ -360,10 +360,8 @@ def eigens(patches):
     
     return Λ.flip(0), V.t().reshape(c*h*w, c, h, w).flip(0)
 
-train_aug = dict(flip=True, translate=4)
-train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=512, aug=train_aug)
-test_loader = PrepadCifarLoader('/tmp/cifar10', train=False, batch_size=1000)
 
+train_loader = PrepadCifarLoader('/tmp/cifar10', train=True)
 train_images = train_loader.normalize(train_loader.images)[:10000]
 
 Λ, V = eigens(patches(train_images)) #center crop to remove padding
@@ -397,14 +395,18 @@ lr = 1.0 / 512
 momentum = 0.9
 wd = 5e-4 * 512
 
+train_aug = dict(flip=True, translate=4)
+train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=batch_size, aug=train_aug)
+test_loader = PrepadCifarLoader('/tmp/cifar10', train=False, batch_size=1000)
+
 total_train_steps = len(train_loader) * epochs
 sched2 = np.interp(np.arange(1+total_train_steps),
-                    [0, int(0.2 * total_train_steps), int(0.8 * total_train_steps), total_train_steps],
-                    [0, 1, 0.1, 0.1])
+                   [0, 2*len(train_loader), (epochs-ema_epochs)*len(train_loader), total_train_steps],
+                   [0, 1, 0.1, 0.1])
 
 epoch_logs = Table(report=lambda data: data['epoch'] % epochs == 0)
 
-for run in range(1):
+for run in range(10):
     
     model = Network(input_whitening_net).half().cuda()
     
@@ -433,25 +435,24 @@ for run in range(1):
         for inputs, labels in train_loader:
             
             ## forward and logging
-            out = model({'input': inputs, 'target': labels})
-            losses = loss_fn(out['logits'], labels)
-            correct = (out['logits'].detach().argmax(1) == labels)
-            logs.extend([('losses', loss), ('acc', correct)])
+            outputs = model({'input': inputs})['logits']
+            losses = loss_fn(outputs, labels)
+            correct = (outputs.detach().argmax(1) == labels)
+            logs.extend([('loss', losses), ('acc', correct)])
             
             ## backward
-            model.zero_grad()
+            opt.zero_grad(set_to_none=True)
             losses.sum().backward()
             
             ## optimizer step
-            scheduler.step()
             opt.step()
+            scheduler.step()
             
             ## ema update
             if next(iter_counter) % update_freq == 0:
                 for (k, v), ema_v in zip(model.state_dict().items(), ema_model.state_dict().values()):
-                    if 'num_batches_tracked' in k:
-                        continue
-                    ema_v.lerp_(v, 1-rho)
+                    if 'num_batches_tracked' not in k:
+                        ema_v.lerp_(v, 1-rho)
         
         train_summary = {k: torch.cat(xs).float().mean().item() for k, xs in group_by_key(logs).items()}
         train_time = timer()
