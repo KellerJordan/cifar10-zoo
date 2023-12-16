@@ -216,9 +216,9 @@ def init_net(net, train_images, eps=1e-2):
     net[0].weight.data[:] = weight.half()
     net[0].weight.requires_grad = False
 
-def print_columns(columns_list, separator_left='|  ', separator_right='  ', final="|",
+def print_columns(columns_list, separator_left='|  ', separator_right='  ', final='|',
                   column_heads_only=False, is_final_entry=False):
-    print_string = ""
+    print_string = ''
     if column_heads_only:
         for column_head_name in columns_list:
             print_string += separator_left + column_head_name + separator_right
@@ -234,7 +234,7 @@ def print_columns(columns_list, separator_left='|  ', separator_right='  ', fina
     if is_final_entry:
         print('-'*(len(print_string))) # print the final output bar
 
-logging_columns_list = ['epoch', 'train_loss', 'val_loss', 'train_acc', 'val_acc', 'ema_val_acc', 'tta_ema_val_acc', 'total_time_seconds']
+logging_columns_list = ['run', 'epoch', 'train_loss', 'val_loss', 'train_acc', 'val_acc', 'ema_val_acc', 'tta_ema_val_acc', 'total_time_seconds']
 def print_training_details(variables, is_final_entry):
     formatted = []
     for col in logging_columns_list:
@@ -249,7 +249,7 @@ def print_training_details(variables, is_final_entry):
         formatted.append(res.rjust(len(col)))
     print_columns(formatted, is_final_entry=is_final_entry)
 
-def main():
+def main(run):
 
     epochs = 10
     batch_size = 512
@@ -352,11 +352,12 @@ def main():
             tta_ema_val_acc = torch.stack(acc_list_ema_tta).mean().item()
 
         print_training_details(locals(), is_final_entry=(epoch == epochs-1))
+        run = None # don't print run after first iteration
         
     return tta_ema_val_acc
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     print_columns(logging_columns_list, column_heads_only=True)
-    accs = torch.tensor([main() for _ in range(25)])
-    print("Mean/std:", accs.mean().item(), accs.std().item())
+    accs = torch.tensor([main(run) for run in range(100)])
+    print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
