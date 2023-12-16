@@ -24,7 +24,6 @@ hyp = {
         'weight_decay': 2 * 6.687e-4, # per example
         'bias_scaler': 64.0,
         'scaling_factor': 1/9,
-        'loss_scale': 32,
     },
     'aug': {
         'translate': 2,
@@ -334,7 +333,8 @@ def main(run):
     momentum = hyp['opt']['momentum']
     wd = hyp['opt']['weight_decay']
     bias_scaler = hyp['opt']['bias_scaler']
-    loss_scale = hyp['opt']['loss_scale']
+
+    loss_scale = 32.
     scaled_lr = (lr / loss_scale)
     scaled_wd = (wd * loss_scale * batch_size)
 
@@ -396,8 +396,9 @@ def main(run):
                     model_ema = NetworkEMA(model)
                 else:
                     # We warm up our ema's decay/momentum value over training (this lets us move fast, then average strongly at the end).
-                    rho = hyp['ema']['decay_base'] ** hyp['ema']['every_n_steps']
-                    model_ema.update(model, decay=rho*(current_steps/total_train_steps)**hyp['ema']['decay_pow'])
+                    base_rho = hyp['ema']['decay_base'] ** hyp['ema']['every_n_steps']
+                    rho = base_rho * (current_steps / total_train_steps) ** hyp['ema']['decay_pow']
+                    model_ema.update(model, decay=rho)
 
             if current_steps >= total_train_steps:
                 break
@@ -411,7 +412,7 @@ def main(run):
         ####################
 
         # save the accuracy and loss from the last training batch of the epoch
-        train_acc = (outputs.detach().argmax(-1) == labels).float().mean().item()
+        train_acc = (outputs.detach().argmax(1) == labels).float().mean().item()
         train_loss = loss.item() / batch_size
 
         model.eval()
@@ -420,10 +421,10 @@ def main(run):
             for inputs, labels in test_loader:
                 outputs = model(inputs)
                 loss_list.append(loss_fn(outputs, labels).float().mean())
-                acc_list.append((outputs.argmax(-1) == labels).float().mean())
+                acc_list.append((outputs.argmax(1) == labels).float().mean())
                 if model_ema:
                     outputs = model_ema(inputs)
-                    acc_list_ema.append((outputs.argmax(-1) == labels).float().mean())
+                    acc_list_ema.append((outputs.argmax(1) == labels).float().mean())
             val_acc = torch.stack(acc_list).mean().item()
             val_loss = torch.stack(loss_list).mean().item()
             ema_val_acc = None
@@ -438,6 +439,8 @@ def main(run):
     #  TTA Evaluation  #
     ####################
 
+    starter.record()
+
     with torch.no_grad():
 
         ## Test-time augmentation strategy:
@@ -447,36 +450,32 @@ def main(run):
         ## This creates 8 inputs per image (left/right times the four directions),
         ## which we evaluate and then weight according to the given probabilities.
 
-        assert model_ema 
-
-        starter.record()
+        test_images = test_loader.normalize(test_loader.images)
+        test_labels = test_loader.labels
 
         pad = 1
-        padded_images = F.pad(test_loader.images, (pad,)*4, 'reflect')
-        images = [test_loader.images]
-        images.append(padded_images[:, :, 0:32, 0:32])
-        images.append(padded_images[:, :, 0:32, 2:34])
-        images.append(padded_images[:, :, 2:34, 0:32])
-        images.append(padded_images[:, :, 2:34, 2:34])
-        images_tta = test_loader.normalize(torch.cat(images))
-        labels = test_loader.labels
-
+        padded_images = F.pad(test_images, (pad,)*4, 'reflect')
+        images_tta = torch.cat([
+            test_images,
+            padded_images[:, :, 0:32, 0:32],
+            padded_images[:, :, 0:32, 2:34],
+            padded_images[:, :, 2:34, 0:32],
+            padded_images[:, :, 2:34, 2:34],
+        ])
         outputs_list = []
         for inputs in images_tta.split(2000):
-            outputs = (0.5 * model_ema(inputs) + 0.5 * model_ema(inputs.flip(-1)))
+            outputs = 0.5 * model_ema(inputs) + 0.5 * model_ema(inputs.flip(-1))
             outputs_list.append(outputs)
-        outputs = torch.cat(outputs_list)
-        outputs = outputs.view(-1, len(labels), 10)
+        outputs = torch.cat(outputs_list).view(-1, len(test_labels), 10)
         
         logits_mirror = outputs[0]
         logits_mirror_jitter = outputs[1:].mean(0)
         logits_tta = (0.5 * logits_mirror + 0.5 * logits_mirror_jitter)
+        tta_ema_val_acc = (logits_tta.argmax(1) == test_labels).float().mean().item()
 
-        tta_ema_val_acc = (logits_tta.argmax(1) == labels).float().mean().item()
-
-        ender.record()
-        torch.cuda.synchronize()
-        total_time_seconds += 1e-3 * starter.elapsed_time(ender)
+    ender.record()
+    torch.cuda.synchronize()
+    total_time_seconds += 1e-3 * starter.elapsed_time(ender)
 
     epoch = 'eval'
     print_training_details(locals(), is_final_entry=True)
