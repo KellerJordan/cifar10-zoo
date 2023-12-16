@@ -221,7 +221,7 @@ def init_net(net, train_images, eps=1e-2):
 def print_columns(columns_list, is_head=False, is_final_entry=False):
     print_string = ''
     for col in columns_list:
-        print_string += '|  %s  ' % column_head_name
+        print_string += '|  %s  ' % col
     print_string += '|'
     if is_head:
         print('-'*len(print_string))
