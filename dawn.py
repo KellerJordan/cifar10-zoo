@@ -97,15 +97,14 @@ class PrepadCifarLoader:
             idxs = indices[i*self.batch_size:(i+1)*self.batch_size]
             yield (images[idxs], self.labels[idxs])
 
+
 ####################
 ## CORE
 #####################
 
-import inspect
 from collections import namedtuple, defaultdict
 from functools import partial
-import functools
-from itertools import chain, count, islice as take
+from itertools import chain, count
 
 #####################
 ## dict utils
@@ -117,32 +116,12 @@ def path_iter(nested_dict, pfx=()):
     for name, val in nested_dict.items():
         if isinstance(val, dict): yield from path_iter(val, pfx+make_tuple(name))
         else: yield (pfx+make_tuple(name), val)  
-            
-map_values = lambda func, dct: {k: func(v) for k,v in dct.items()}
-
-def map_nested(func, nested_dict):
-    return {k: map_nested(func, v) if isinstance(v, dict) else func(v) for k,v in nested_dict.items()}
 
 def group_by_key(seq):
     res = defaultdict(list)
     for k, v in seq: 
         res[k].append(v) 
     return res
-
-reorder = lambda dct, keys: {k: dct[k] for k in keys}
-
-#####################
-## graph building
-#####################
-
-def identity(value): return value
-
-def build_graph(net, path_map='_'.join):
-    net = {path: node if len(node) == 3 else (*node, None) for path, node in path_iter(net)}
-    default_inputs = chain([('input',)], net.keys())
-    resolve_path = lambda path, pfx: pfx+path if (pfx+path in net or not pfx) else resolve_path(net, path, pfx[:-1])
-    return {path_map(path): (typ, value, ([path_map(default)] if inputs is None else [path_map(resolve_path(make_tuple(k), path[:-1])) for k in inputs])) 
-            for (path, (typ, value, inputs)), default in zip(net.items(), default_inputs)}
 
 #####################
 ## Layers
@@ -157,37 +136,6 @@ from collections import namedtuple
 import copy
 
 torch.backends.cudnn.benchmark = True
-
-class Network(nn.Module):
-    def __init__(self, net):
-        super().__init__()
-        self.graph = {path: (typ, typ(**params), inputs) for path, (typ, params, inputs) in build_graph(net).items()}
-        for path, (_,node,_) in self.graph.items(): 
-            setattr(self, path, node)
-    
-    def nodes(self):
-        return (node for _,node,_ in self.graph.values())
-    
-    def forward(self, inputs):
-        outputs = dict(inputs)
-        for k, (_, node, ins) in self.graph.items():
-            outputs[k] = node(*[outputs[x] for x in ins])
-        return outputs
-    
-    def half(self):
-        for node in self.nodes():
-            if isinstance(node, nn.Module) and not isinstance(node, nn.BatchNorm2d):
-                node.half()
-        return self
-    
-class Add(namedtuple('Add', [])):
-    def __call__(self, x, y): return x + y 
-    
-class AddWeighted(namedtuple('AddWeighted', ['wx', 'wy'])):
-    def __call__(self, x, y): return self.wx*x + self.wy*y 
-    
-class Identity(namedtuple('Identity', [])):
-    def __call__(self, x): return x
 
 class BatchNorm(nn.BatchNorm2d):
     def __init__(self, num_features, eps=1e-05, momentum=0.1, weight=True, bias=True):
@@ -221,36 +169,7 @@ class GhostBatchNorm(BatchNorm):
             return F.batch_norm(
                 input, self.running_mean[:self.num_features], self.running_var[:self.num_features], 
                 self.weight, self.bias, False, self.momentum, self.eps)
-        
-class Mul(nn.Module):
-    def __init__(self, weight):
-        super().__init__()
-        self.weight = weight
-    def __call__(self, x): 
-        return x*self.weight
-    
-class Flatten(nn.Module):
-    def forward(self, x): 
-        return x.view(x.size(0), x.size(1))
-    
-# node definitions   
-from inspect import signature    
 
-class node_def(namedtuple('node_def', ['type'])):
-    def __call__(self, *args, **kwargs):
-        return (self.type, dict(signature(self.type).bind(*args, **kwargs).arguments))
-
-conv = node_def(nn.Conv2d)
-linear = node_def(nn.Linear)
-batch_norm = node_def(BatchNorm)
-pool = node_def(nn.MaxPool2d)
-relu = node_def(nn.ReLU)
-    
-def map_types(mapping, net):
-    def f(node):
-        typ, *rest = node
-        return (mapping.get(typ, typ), *rest)
-    return map_nested(f, net) 
 
 #####################
 ## TRAINING
@@ -295,49 +214,7 @@ class Table():
             print(*(self.formatter(data[k]) for k in self.keys))
             
     def df(self):
-        return pd.DataFrame([{'_'.join(p): v for p,v in path_iter(row)} for row in self.log])     
-
-#####################
-## Network
-#####################
-
-conv_block = lambda c_in, c_out: {
-    'conv': conv(in_channels=c_in, out_channels=c_out, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False), 
-    'norm': batch_norm(c_out), 
-    'act':  relu(),
-}
-
-conv_pool_block = lambda c_in, c_out: dict(conv_block(c_in, c_out), pool=pool(2))
-conv_pool_block_pre = lambda c_in, c_out: reorder(conv_pool_block(c_in, c_out), ('conv', 'pool', 'norm', 'act'))
-
-residual = lambda c, conv_block: {
-    'in': (Identity, {}),
-    'res1': conv_block(c, c),
-    'res2': conv_block(c, c),
-    'out': (Identity, {}),
-    'add': (Add, {}, ['in', 'out']),
-}
-
-channels={'prep': 64, 'layer1': 128, 'layer2': 256, 'layer3': 512}
-def build_network(channels=channels, res_layers=('layer1', 'layer3'), scale=1/8, conv_block=conv_block, 
-                  prep_block=conv_block, conv_pool_block=conv_pool_block, types=None): 
-    net = {
-        'prep': prep_block(3, channels['prep']),
-        'layer1': conv_pool_block(channels['prep'], channels['layer1']),
-        'layer2': conv_pool_block(channels['layer1'], channels['layer2']),
-        'layer3': conv_pool_block(channels['layer2'], channels['layer3']),
-        'pool': pool(4),
-        'classifier': {
-            'flatten': (Flatten, {}),
-            'conv': linear(channels['layer3'], 10, bias=False),
-            'scale': (Mul, {'weight': scale}),
-        },
-        'logits': (Identity, {}),
-    }
-    for layer in res_layers:
-        net[layer]['residual'] = residual(channels[layer], conv_block)    
-    if types: net = map_types(types, net)
-    return net
+        return pd.DataFrame([{'_'.join(p): v for p,v in path_iter(row)} for row in self.log])
 
 #####################
 ## Misc
@@ -360,30 +237,87 @@ def eigens(patches):
     
     return Λ.flip(0), V.t().reshape(c*h*w, c, h, w).flip(0)
 
-
 train_loader = PrepadCifarLoader('/tmp/cifar10', train=True)
 train_images = train_loader.normalize(train_loader.images)[:10000]
+Λ, V = eigens(patches(train_images))
 
-Λ, V = eigens(patches(train_images)) #center crop to remove padding
+from tqdm import tqdm
 
-def whitening_block(c_in, c_out, Λ=None, V=None, eps=1e-2):
+
+class Residual(nn.Module):
+    def __init__(self, module):
+        super().__init__()
+        self.module = module
+    def forward(self, x): 
+        return x + self.module(x)
+    
+class Flatten(nn.Module):
+    def forward(self, x): 
+        return x.view(x.size(0), -1)
+    
+class Mul(nn.Module):
+        def __init__(self, weight):
+            super().__init__()
+            self.weight = weight
+        def forward(self, x): 
+            return x * self.weight
+
+def conv(in_channels, out_channels, kernel_size=3, padding=1):
+    return nn.Conv2d(in_channels, out_channels,
+                     kernel_size=kernel_size, stride=1, padding=padding, bias=False)
+
+def whitening_conv(eps=1e-2):
     filt = nn.Conv2d(3, 27, kernel_size=(3,3), padding=(1,1), bias=False)
     filt.weight.data = (V/torch.sqrt(Λ+eps)[:,None,None,None])
     filt.weight.requires_grad = False
+    return filt
+
+act = nn.CELU(0.3)
+bn = lambda channels: GhostBatchNorm(channels, num_splits=16, weight=False)
+
+def make_net():
+    net = nn.Sequential(
+        conv(3, 27),
+        nn.Sequential(conv(27, 64, 1, 0), bn(64), act),
+        nn.Sequential(conv(64, 128), nn.MaxPool2d(2), bn(128), act),
+        Residual(nn.Sequential(
+            conv(128, 128),
+            bn(128),
+            act,
+            conv(128, 128),
+            bn(128),
+            act,
+        )),
+        nn.Sequential(conv(128, 256), nn.MaxPool2d(2), bn(256), act),
+        nn.Sequential(conv(256, 512), nn.MaxPool2d(2), bn(512), act),
+        Residual(nn.Sequential(
+            conv(512, 512),
+            bn(512),
+            act,
+            conv(512, 512),
+            bn(512),
+            act,
+        )),
+        nn.MaxPool2d(4),
+        Flatten(),
+        nn.Linear(512, 10, bias=False),
+        Mul(1/16),
+    )
+    whiten_conv = whitening_conv()
+    net[0] = whiten_conv
+    net = net.cuda().half()
     
-    return {
-        'whiten': (identity, {'value': filt}),
-        'conv': conv(27, c_out, kernel_size=(1, 1), bias=False),
-        'norm': batch_norm(c_out), 
-        'act':  relu(),
-    }
+    net[1][1].float()
+    net[2][2].float()
+    net[3].module[1].float()
+    net[3].module[4].float()
+    net[4][2].float()
+    net[5][2].float()
+    net[6].module[1].float()
+    net[6].module[4].float()
+    
+    return net
 
-input_whitening_net = build_network(conv_pool_block=conv_pool_block_pre, prep_block=partial(whitening_block, Λ=Λ, V=V), scale=1/16, types={
-    nn.ReLU: partial(nn.CELU, 0.3),
-    BatchNorm: partial(GhostBatchNorm, num_splits=16, weight=False)
-})
-
-from tqdm import tqdm
 
 epochs = 10
 batch_size = 512
@@ -399,16 +333,16 @@ train_aug = dict(flip=True, translate=4)
 train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=batch_size, aug=train_aug)
 test_loader = PrepadCifarLoader('/tmp/cifar10', train=False, batch_size=1000)
 
-total_train_steps = len(train_loader) * epochs
-sched2 = np.interp(np.arange(1+total_train_steps),
-                   [0, 2*len(train_loader), (epochs-ema_epochs)*len(train_loader), total_train_steps],
-                   [0, 1, 0.1, 0.1])
+total_train_steps = epochs * len(train_loader)
+sched = np.interp(np.arange(1+total_train_steps),
+                  [0, 2*len(train_loader), (epochs-ema_epochs)*len(train_loader), total_train_steps],
+                  [0, 1, 0.1, 0.1])
 
 epoch_logs = Table(report=lambda data: data['epoch'] % epochs == 0)
 
-for run in range(10):
+for run in range(25):
     
-    model = Network(input_whitening_net).half().cuda()
+    model = make_net()
     
     ## optimizer setup
     nonbias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' not in k]
@@ -417,7 +351,7 @@ for run in range(10):
     hyp_bias = dict(params=bias_params, lr=lr*64, weight_decay=wd/64)
     
     opt = torch.optim.SGD([hyp_nonbias, hyp_bias], momentum=momentum, nesterov=True)
-    scheduler = torch.optim.lr_scheduler.LambdaLR(opt, sched2.__getitem__)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(opt, sched.__getitem__)
     
     ## ema setup
     ema_model = copy.deepcopy(model)
@@ -428,6 +362,8 @@ for run in range(10):
     
     timer = Timer(torch.cuda.synchronize)
     
+    xx = []
+    
     for epoch in tqdm(range(epochs)):
         
         logs = []
@@ -435,7 +371,8 @@ for run in range(10):
         for inputs, labels in train_loader:
             
             ## forward and logging
-            outputs = model({'input': inputs})['logits']
+            outputs = model(inputs)
+    
             losses = loss_fn(outputs, labels)
             correct = (outputs.detach().argmax(1) == labels)
             logs.extend([('loss', losses), ('acc', correct)])
@@ -443,6 +380,8 @@ for run in range(10):
             ## backward
             opt.zero_grad(set_to_none=True)
             losses.sum().backward()
+            
+            xx.append(losses.detach().mean().item())
             
             ## optimizer step
             opt.step()
@@ -461,9 +400,7 @@ for run in range(10):
         ema_model.eval()
         for inputs, labels in test_loader:
             with torch.no_grad():
-                logits = ema_model({'input': inputs})['logits']
-                logits_flip = ema_model({'input': inputs.flip(-1)})['logits']
-                logits_tta = (logits + logits_flip) / 2
+                logits_tta = ema_model(inputs) + ema_model(inputs.flip(-1))
             losses = loss_fn(logits_tta, labels)
             correct = (logits_tta.argmax(1) == labels)
             logs.extend([('loss', losses), ('acc', correct)])
