@@ -102,9 +102,9 @@ import copy
 from tqdm import tqdm
 from itertools import count
 
-#####################
-## Layers
-##################### 
+#############################################
+#            Network Components             #
+#############################################
 
 import numpy as np
 import torch
@@ -216,6 +216,10 @@ def init_net(net, train_images, eps=1e-2):
     net[0].weight.data[:] = weight.half()
     net[0].weight.requires_grad = False
 
+########################################
+#               Logging                #
+########################################
+
 def print_columns(columns_list, is_head=False, is_final_entry=False):
     print_string = ''
     for col in columns_list:
@@ -241,6 +245,10 @@ def print_training_details(variables, is_final_entry):
             res = ''
         formatted.append(res.rjust(len(col)))
     print_columns(formatted, is_final_entry=is_final_entry)
+
+########################################
+#           Train and Eval             #
+########################################
 
 def main(run):
 
