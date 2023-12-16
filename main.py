@@ -19,10 +19,10 @@ hyp = {
     'opt': {
         'batch_size': 1024,
         'train_epochs': 10.0,
-        'lr': 1.525 / 1024, # per example
+        'lr': 1.5 / 1024,           # learning rate per example
         'momentum': 0.85,
-        'weight_decay': 2 * 6.687e-4, # per example
-        'bias_scaler': 64.0,
+        'weight_decay': 1.33e-3,    # weight decay per example
+        'bias_scaler': 64.0,        # how much to scale up the learning rate (but not weight decay) for BatchNorm biases
         'scaling_factor': 1/9,
     },
     'aug': {
@@ -33,7 +33,7 @@ hyp = {
             'kernel_size': 2,
         },
         'batch_norm_momentum': 0.6,
-        'base_depth': 64
+        'base_depth': 64,
     },
     'ema': {
         'start_epochs': 2,
@@ -257,18 +257,12 @@ def init_net(net, train_images):
         # Renormalize the weights to match the original initialization statistics
         block.conv1.weight.data.sub_(mean_post).div_(std_post).mul_(std_pre).add_(mean_pre)
 
-        ## We do the same for the second layer in each convolution group block, since this only
-        ## adds a simple multiplier to the inputs instead of the noise of a randomly-initialized
-        ## convolution. This can be easily scaled down by the network, and the weights can more easily
-        ## pivot in whichever direction they need to go now.
-        ## The reason that I believe that this works so well is because a combination of MaxPool2d
-        ## and the nn.GeLU function's positive bias encouraging values towards the nearly-linear
-        ## region of the GeLU activation function at network initialization. I am not currently
-        ## sure about this, however, it will require some more investigation. For now -- it works! D:
+        ## We do the same for the second layer in each convolution group block; this only adds a
+        ## simple multiplier to the inputs instead of the noise of a randomly-initialized convolution.
         torch.nn.init.dirac_(block.conv2.weight)
 
 ########################################
-#          Training Helpers            #
+#                 EMA                  #
 ########################################
 
 class NetworkEMA(nn.Module):
@@ -324,9 +318,6 @@ def print_training_details(variables, is_final_entry):
 
 def main(run):
 
-    train_augs = dict(flip=True, translate=hyp['aug']['translate'])
-    loss_fn = nn.CrossEntropyLoss(label_smoothing=0.2, reduction='none')
-
     batch_size = hyp['opt']['batch_size']
     epochs = hyp['opt']['train_epochs']
     lr = hyp['opt']['lr']
@@ -334,9 +325,8 @@ def main(run):
     wd = hyp['opt']['weight_decay']
     bias_scaler = hyp['opt']['bias_scaler']
 
-    loss_scale = 32.
-    scaled_lr = (lr / loss_scale)
-    scaled_wd = (wd * loss_scale * batch_size)
+    train_augs = dict(flip=True, translate=hyp['aug']['translate'])
+    loss_fn = nn.CrossEntropyLoss(label_smoothing=0.2, reduction='none')
 
     train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=batch_size, aug=train_augs)
     test_loader = PrepadCifarLoader('/tmp/cifar10', train=False, batch_size=2000)
@@ -346,8 +336,13 @@ def main(run):
                             [0, int(0.23 * total_train_steps), total_train_steps],
                             [0.2, 1, 0.07]) 
 
+    loss_scale = 32.
+    scaled_lr = (lr / loss_scale)
+    scaled_wd = (wd * loss_scale * batch_size)
+
     model = make_net()
     model_ema = None
+    current_steps = 0
 
     nonbias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' not in k]
     bias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' in k]
@@ -360,8 +355,7 @@ def main(run):
     starter = torch.cuda.Event(enable_timing=True)
     ender = torch.cuda.Event(enable_timing=True)
 
-    total_time_seconds = 0.
-    current_steps = 0.
+    total_time_seconds = 0.0
 
     ## Initialize the whitening layer using training images
     starter.record()
@@ -444,8 +438,8 @@ def main(run):
     with torch.no_grad():
 
         ## Test-time augmentation strategy:
-        ## 1. Flip (mirror) the image left-to-right (50% of the time).
-        ## 2. Then jitter the image by one pixel (50% of the time, i.e. both happen 25% of the time).
+        ## 1. Flip (/"mirror") the image left-to-right (50% of the time).
+        ## 2. Translate (/"jitter") the image by one pixel in any direction (50% of the time, i.e. both happen 25% of the time).
         ##
         ## This creates 8 inputs per image (left/right times the four directions),
         ## which we evaluate and then weight according to the given probabilities.
@@ -488,7 +482,7 @@ if __name__ == "__main__":
         code = f.read()
 
     print_columns(logging_columns_list, is_head=True)
-    accs = torch.tensor([main(run) for run in range(10)])
+    accs = torch.tensor([main(run) for run in range(400)])
     print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
     log = {'code': code, 'accs': accs}
