@@ -397,27 +397,28 @@ ema_epochs = 2
 
 loss_fn = nn.CrossEntropyLoss(label_smoothing=0.2, reduction='none')
 
-nonbias_wd = 5e-4*batch_size
-bias_wd = 5e-4*batch_size/64
+lr = 1.0
 momentum = 0.9
+wd = 5e-4
+
 lr_schedule = lambda knots, vals, batch_size: PiecewiseLinear(np.array(knots)*len(train_loader),
                                                               np.array(vals)/batch_size)
-nonbias_sched = lr_schedule([0, epochs/5, epochs - ema_epochs], [0.0, 1.0, 0.1], batch_size)
-bias_sched = lr_schedule([0, epochs/5, epochs - ema_epochs], [0.0, 1.0*64, 0.1*64], batch_size)
+sched = lr_schedule([0, epochs/5, epochs - ema_epochs], [0.0, 1.0, 0.1], batch_size)
 
 epoch_logs = Table(report=lambda data: data['epoch'] % epochs == 0)
 
-for run in range(5):
+for run in range(10):
     
     model = Network(input_whitening_net).half().cuda()
     
     ## optimizer state
     nonbias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' not in k]
     bias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' in k]
-    nonbias_opt = torch.optim.SGD(nonbias_params, lr=1.0, weight_decay=nonbias_wd, momentum=0.9, nesterov=True)
-    nonbias_scheduler = torch.optim.lr_scheduler.LambdaLR(nonbias_opt, nonbias_sched.__call__)
-    bias_opt = torch.optim.SGD(bias_params, lr=1.0, weight_decay=bias_wd, momentum=0.9, nesterov=True)
-    bias_scheduler = torch.optim.lr_scheduler.LambdaLR(bias_opt, bias_sched.__call__)
+    hyp_nonbias = dict(params=nonbias_params, lr=lr, weight_decay=wd*batch_size)
+    hyp_bias = dict(params=bias_params, lr=lr*64, weight_decay=wd*batch_size/64)
+    
+    opt = torch.optim.SGD([hyp_nonbias, hyp_bias], momentum=momentum, nesterov=True)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(opt, sched.__call__)
     
     ## ema state
     ema_model = copy.deepcopy(model)
@@ -445,18 +446,15 @@ for run in range(5):
             loss.sum().backward()
             
             ## optimizer step
-            nonbias_scheduler.step()
-            nonbias_opt.step()
-            bias_scheduler.step()
-            bias_opt.step()
+            scheduler.step()
+            opt.step()
             
             ## ema update
             if next(iter_counter) % update_freq == 0:
                 for (k, v), ema_v in zip(model.state_dict().items(), ema_model.state_dict().values()):
                     if 'num_batches_tracked' in k:
                         continue
-                    ema_v *= rho
-                    ema_v += (1-rho)*v
+                    ema_v.lerp_(v, 1-rho)
         
         train_summary = {k: torch.cat(xs).float().mean().item() for k, xs in group_by_key(logs).items()}
         train_time = timer()
