@@ -154,17 +154,12 @@ class Conv(nn.Conv2d):
     def __init__(self, in_channels, out_channels, kernel_size=3, padding='same', bias=False):
         super().__init__(in_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=bias)
 
-class Linear(nn.Linear):
-    def __init__(self, *args, temperature=None, **kwargs):
-        super().__init__(*args, **kwargs)
+class Mul(nn.Module):
+    def __init__(self, temperature):
+        super().__init__()
         self.temperature = temperature
-
-    def forward(self, x):
-        if self.temperature is not None:
-            weight = self.weight * self.temperature
-        else:
-            weight = self.weight
-        return x @ weight.T
+    def forward(self, x): 
+        return x * self.temperature
 
 class ConvGroup(nn.Module):
     def __init__(self, channels_in, channels_out):
@@ -196,33 +191,22 @@ class FastGlobalMaxPooling(nn.Module):
 #############################################
 
 def get_patches(x, patch_shape):
-    # This uses the unfold operation (https://pytorch.org/docs/stable/generated/torch.nn.functional.unfold.html?highlight=unfold#torch.nn.functional.unfold)
-    # to extract a _view_ (i.e., there's no data copied here) of blocks in the input tensor. We have to do it twice -- once horizontally, once vertically. Then
-    # from that, we get our kernel_size*kernel_size patches to later calculate the statistics for the whitening tensor on :D
     c, (h, w) = x.shape[1], patch_shape
     return x.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1,c,h,w).float()
 
 def get_whitening_parameters(patches):
-    # As a high-level summary, we're basically finding the high-dimensional oval that best fits the data here.
-    # We can then later use this information to map the input information to a nicely distributed sphere, where also
-    # the most significant features of the inputs each have their own axis. This significantly cleans things up for the
-    # rest of the neural network and speeds up training.
     n,c,h,w = patches.shape
     patches_flat = patches.view(n, -1)
     est_patch_covariance = (patches_flat.T @ patches_flat) / n
     eigenvalues, eigenvectors = torch.linalg.eigh(est_patch_covariance, UPLO='U')
     return eigenvalues.flip(0).view(-1, 1, 1, 1), eigenvectors.T.reshape(c*h*w,c,h,w).flip(0)
 
-# Run this over the training set to calculate the patch statistics, then set the initial convolution as a non-learnable 'whitening' layer
 # Note that this is a large epsilon, so the bottom half of principal directions won't fully whiten
 def init_whitening_conv(layer, train_set, eps=5e-4):
     patches = get_patches(train_set, patch_shape=layer.weight.data.shape[2:])
     eigenvalues, eigenvectors = get_whitening_parameters(patches)
-    eigenvectors_scaled = eigenvectors/torch.sqrt(eigenvalues+eps) # set the filters as the eigenvectors in order to whiten inputs
-    eigenvectors_scaled_truncated = eigenvectors_scaled[:len(layer.weight)//2]
-    layer.weight.data[:] = torch.cat((eigenvectors_scaled_truncated, -eigenvectors_scaled_truncated))
-    ## We don't want to train this, since this is implicitly whitening over the whole dataset
-    ## For more info, see David Page's original blogposts (link in the README.md as of this commit.)
+    eigenvectors_scaled = eigenvectors / torch.sqrt(eigenvalues + eps)
+    layer.weight.data[:] = torch.cat((eigenvectors_scaled, -eigenvectors_scaled))
     layer.weight.requires_grad = False
 
 #############################################
@@ -230,43 +214,24 @@ def init_whitening_conv(layer, train_set, eps=5e-4):
 #############################################
 
 depths = {
-    'block1': round(1 * hyp['net']['base_depth']), # 64  w/ scaler at base value
-    'block2': round(4 * hyp['net']['base_depth']), # 256 w/ scaler at base value
-    'block3': round(7 * hyp['net']['base_depth']), # 448 w/ scaler at base value
+    'block1': (1 * hyp['net']['base_depth']), # 64  w/ depth at base value
+    'block2': (4 * hyp['net']['base_depth']), # 256 w/ depth at base value
+    'block3': (7 * hyp['net']['base_depth']), # 448 w/ depth at base value
     'num_classes': 10
 }
 
-class SpeedyConvNet(nn.Module):
-    def __init__(self, network_dict):
-        super().__init__()
-        self.net_dict = network_dict # flexible, defined in the make_net function
-
-    # This allows you to customize/change the execution order of the network as needed.
-    def forward(self, x):
-        x = self.net_dict['initial_block']['whiten'](x)
-        x = self.net_dict['initial_block']['activation'](x)
-        x = self.net_dict['conv_group_1'](x)
-        x = self.net_dict['conv_group_2'](x)
-        x = self.net_dict['conv_group_3'](x)
-        x = self.net_dict['pooling'](x)
-        x = self.net_dict['linear'](x)
-        return x
-
 def make_net():
     whiten_conv_depth = 2 * 3 * hyp['net']['whitening']['kernel_size']**2
-    network_dict = nn.ModuleDict({
-        'initial_block': nn.ModuleDict({
-            'whiten': Conv(3, whiten_conv_depth, kernel_size=hyp['net']['whitening']['kernel_size'], padding=0),
-            'activation': nn.GELU(),
-        }),
-        'conv_group_1': ConvGroup(whiten_conv_depth, depths['block1']),
-        'conv_group_2': ConvGroup(depths['block1'],  depths['block2']),
-        'conv_group_3': ConvGroup(depths['block2'],  depths['block3']),
-        'pooling': FastGlobalMaxPooling(),
-        'linear': Linear(depths['block3'], depths['num_classes'], bias=False, temperature=hyp['opt']['scaling_factor']),
-    })
-
-    net = SpeedyConvNet(network_dict)
+    net = nn.Sequential(
+        Conv(3, whiten_conv_depth, kernel_size=hyp['net']['whitening']['kernel_size'], padding=0),
+        nn.GELU(),
+        ConvGroup(whiten_conv_depth, depths['block1']),
+        ConvGroup(depths['block1'],  depths['block2']),
+        ConvGroup(depths['block2'],  depths['block3']),
+        FastGlobalMaxPooling(),
+        nn.Linear(depths['block3'], depths['num_classes'], bias=False),
+        Mul(hyp['opt']['scaling_factor']),
+    )
     net = net.cuda()
     net = net.to(memory_format=torch.channels_last)
     net.half()
@@ -276,36 +241,32 @@ def make_net():
     return net
 
 def init_net(net, train_images):
+    init_whitening_conv(net[0], train_images)
+    for block in net[2:5]:
+        # Create an implicit residual via a dirac-initialized tensor
+        dirac_weights_in = torch.nn.init.dirac_(torch.empty_like(block.conv1.weight))
 
-    with torch.no_grad():
-        init_whitening_conv(net.net_dict['initial_block']['whiten'], train_images)
+        # Add the implicit residual to the already-initialized convolutional transition layer.
+        # One can use more sophisticated initializations, but this one appeared worked best in testing.
+        # What this does is brings up the features from the previous residual block virtually, so not only 
+        # do we have residual information flow within each block, we have a nearly direct connection from
+        # the early layers of the network to the loss function.
+        std_pre, mean_pre = torch.std_mean(block.conv1.weight.data)
+        block.conv1.weight.data = block.conv1.weight.data + dirac_weights_in 
+        std_post, mean_post = torch.std_mean(block.conv1.weight.data)
 
-        for name, block in net.net_dict.items():
-            if 'conv_group' in name:
-                # Create an implicit residual via a dirac-initialized tensor
-                dirac_weights_in = torch.nn.init.dirac_(torch.empty_like(block.conv1.weight))
+        # Renormalize the weights to match the original initialization statistics
+        block.conv1.weight.data.sub_(mean_post).div_(std_post).mul_(std_pre).add_(mean_pre)
 
-                # Add the implicit residual to the already-initialized convolutional transition layer.
-                # One can use more sophisticated initializations, but this one appeared worked best in testing.
-                # What this does is brings up the features from the previous residual block virtually, so not only 
-                # do we have residual information flow within each block, we have a nearly direct connection from
-                # the early layers of the network to the loss function.
-                std_pre, mean_pre = torch.std_mean(block.conv1.weight.data)
-                block.conv1.weight.data = block.conv1.weight.data + dirac_weights_in 
-                std_post, mean_post = torch.std_mean(block.conv1.weight.data)
-
-                # Renormalize the weights to match the original initialization statistics
-                block.conv1.weight.data.sub_(mean_post).div_(std_post).mul_(std_pre).add_(mean_pre)
-
-                ## We do the same for the second layer in each convolution group block, since this only
-                ## adds a simple multiplier to the inputs instead of the noise of a randomly-initialized
-                ## convolution. This can be easily scaled down by the network, and the weights can more easily
-                ## pivot in whichever direction they need to go now.
-                ## The reason that I believe that this works so well is because a combination of MaxPool2d
-                ## and the nn.GeLU function's positive bias encouraging values towards the nearly-linear
-                ## region of the GeLU activation function at network initialization. I am not currently
-                ## sure about this, however, it will require some more investigation. For now -- it works! D:
-                torch.nn.init.dirac_(block.conv2.weight)
+        ## We do the same for the second layer in each convolution group block, since this only
+        ## adds a simple multiplier to the inputs instead of the noise of a randomly-initialized
+        ## convolution. This can be easily scaled down by the network, and the weights can more easily
+        ## pivot in whichever direction they need to go now.
+        ## The reason that I believe that this works so well is because a combination of MaxPool2d
+        ## and the nn.GeLU function's positive bias encouraging values towards the nearly-linear
+        ## region of the GeLU activation function at network initialization. I am not currently
+        ## sure about this, however, it will require some more investigation. For now -- it works! D:
+        torch.nn.init.dirac_(block.conv2.weight)
 
 ########################################
 #          Training Helpers            #
@@ -528,7 +489,7 @@ if __name__ == "__main__":
         code = f.read()
 
     print_columns(logging_columns_list, is_head=True)
-    accs = torch.tensor([main(run) for run in range(25)])
+    accs = torch.tensor([main(run) for run in range(10)])
     print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
     log = {'code': code, 'accs': accs}
