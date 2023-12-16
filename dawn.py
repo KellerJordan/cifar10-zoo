@@ -302,103 +302,106 @@ def init_net(net, train_images):
     whiten_conv = whitening_conv()
     net[0] = whiten_conv.half().cuda()
 
+def main():
+    epochs = 10
+    batch_size = 512
+    ema_epochs = 2
 
-epochs = 10
-batch_size = 512
-ema_epochs = 2
+    loss_fn = nn.CrossEntropyLoss(label_smoothing=0.2, reduction='none')
 
-loss_fn = nn.CrossEntropyLoss(label_smoothing=0.2, reduction='none')
+    lr = 1.0 / 512
+    momentum = 0.9
+    wd = 5e-4 * 512
 
-lr = 1.0 / 512
-momentum = 0.9
-wd = 5e-4 * 512
+    train_aug = dict(flip=True, translate=4)
+    train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=batch_size, aug=train_aug)
+    test_loader = PrepadCifarLoader('/tmp/cifar10', train=False, batch_size=1000)
 
-train_aug = dict(flip=True, translate=4)
-train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=batch_size, aug=train_aug)
-test_loader = PrepadCifarLoader('/tmp/cifar10', train=False, batch_size=1000)
+    total_train_steps = epochs * len(train_loader)
+    sched = np.interp(np.arange(1+total_train_steps),
+                      [0, 2*len(train_loader), (epochs-ema_epochs)*len(train_loader), total_train_steps],
+                      [0, 1, 0.1, 0.1])
 
-total_train_steps = epochs * len(train_loader)
-sched = np.interp(np.arange(1+total_train_steps),
-                  [0, 2*len(train_loader), (epochs-ema_epochs)*len(train_loader), total_train_steps],
-                  [0, 1, 0.1, 0.1])
+    epoch_logs = Table(report=lambda data: data['epoch'] % epochs == 0)
 
-epoch_logs = Table(report=lambda data: data['epoch'] % epochs == 0)
-
-for run in range(100):
-    
-    model = make_net()
-    train_images = train_loader.normalize(train_loader.images)[:10000]
-    init_net(model, train_images)
-    
-    ## optimizer setup
-    nonbias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' not in k]
-    bias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' in k]
-    hyp_nonbias = dict(params=nonbias_params, lr=lr, weight_decay=wd)
-    hyp_bias = dict(params=bias_params, lr=lr*64, weight_decay=wd/64)
-    
-    opt = torch.optim.SGD([hyp_nonbias, hyp_bias], momentum=momentum, nesterov=True)
-    scheduler = torch.optim.lr_scheduler.LambdaLR(opt, sched.__getitem__)
-    
-    ## ema setup
-    ema_model = copy.deepcopy(model)
-    ema_momentum = 0.99
-    update_freq = 5
-    rho = ema_momentum**update_freq
-    iter_counter = count()
-    
-    timer = Timer(torch.cuda.synchronize)
-    
-    for epoch in tqdm(range(epochs)):
+    for run in range(100):
         
-        logs = []
-        model.train()
-        for inputs, labels in train_loader:
-            
-            ## forward and logging
-            outputs = model(inputs)
-    
-            losses = loss_fn(outputs, labels)
-            correct = (outputs.detach().argmax(1) == labels)
-            logs.extend([('loss', losses), ('acc', correct)])
-            
-            ## backward
-            opt.zero_grad(set_to_none=True)
-            losses.sum().backward()
-            
-            ## optimizer step
-            opt.step()
-            scheduler.step()
-            
-            ## ema update
-            if next(iter_counter) % update_freq == 0:
-                for (k, v), ema_v in zip(model.state_dict().items(), ema_model.state_dict().values()):
-                    if 'num_batches_tracked' not in k:
-                        ema_v.lerp_(v, 1-rho)
+        model = make_net()
+        train_images = train_loader.normalize(train_loader.images)[:10000]
+        init_net(model, train_images)
         
-        train_summary = {k: torch.cat(xs).float().mean().item() for k, xs in group_by_key(logs).items()}
-        train_time = timer()
+        ## optimizer setup
+        nonbias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' not in k]
+        bias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' in k]
+        hyp_nonbias = dict(params=nonbias_params, lr=lr, weight_decay=wd)
+        hyp_bias = dict(params=bias_params, lr=lr*64, weight_decay=wd/64)
+        
+        opt = torch.optim.SGD([hyp_nonbias, hyp_bias], momentum=momentum, nesterov=True)
+        scheduler = torch.optim.lr_scheduler.LambdaLR(opt, sched.__getitem__)
+        
+        ## ema setup
+        ema_model = copy.deepcopy(model)
+        ema_momentum = 0.99
+        update_freq = 5
+        rho = ema_momentum**update_freq
+        iter_counter = count()
+        
+        timer = Timer(torch.cuda.synchronize)
+        
+        for epoch in tqdm(range(epochs)):
+            
+            logs = []
+            model.train()
+            for inputs, labels in train_loader:
+                
+                ## forward and logging
+                outputs = model(inputs)
+        
+                losses = loss_fn(outputs, labels)
+                correct = (outputs.detach().argmax(1) == labels)
+                logs.extend([('loss', losses), ('acc', correct)])
+                
+                ## backward
+                opt.zero_grad(set_to_none=True)
+                losses.sum().backward()
+                
+                ## optimizer step
+                opt.step()
+                scheduler.step()
+                
+                ## ema update
+                if next(iter_counter) % update_freq == 0:
+                    for (k, v), ema_v in zip(model.state_dict().items(), ema_model.state_dict().values()):
+                        if 'num_batches_tracked' not in k:
+                            ema_v.lerp_(v, 1-rho)
+            
+            train_summary = {k: torch.cat(xs).float().mean().item() for k, xs in group_by_key(logs).items()}
+            train_time = timer()
 
-        logs = []
-        ema_model.eval()
-        for inputs, labels in test_loader:
-            with torch.no_grad():
-                logits_tta = ema_model(inputs) + ema_model(inputs.flip(-1))
-            losses = loss_fn(logits_tta, labels)
-            correct = (logits_tta.argmax(1) == labels)
-            logs.extend([('loss', losses), ('acc', correct)])
+            logs = []
+            ema_model.eval()
+            for inputs, labels in test_loader:
+                with torch.no_grad():
+                    logits_tta = ema_model(inputs) + ema_model(inputs.flip(-1))
+                losses = loss_fn(logits_tta, labels)
+                correct = (logits_tta.argmax(1) == labels)
+                logs.extend([('loss', losses), ('acc', correct)])
 
-        valid_summary = {k: torch.cat(xs).float().mean().item() for k, xs in group_by_key(logs).items()}
-        valid_time = timer(update_total=False)
-        
-        log = {
-            'train': {'time': train_time, **train_summary}, 
-            'valid': {'time': valid_time, **valid_summary}, 
-            'total time': timer.total_time
-        }
-        epoch_logs.append({'run': run+1, 'epoch': epoch+1, **log})
-        
-cols = ['valid_acc']
-summary = epoch_logs.df().query('epoch==epoch.max()')[cols].describe().transpose().astype({'count': int})[
-    ['count', 'mean', 'min', 'max', 'std']]
-print(summary)
+            valid_summary = {k: torch.cat(xs).float().mean().item() for k, xs in group_by_key(logs).items()}
+            valid_time = timer(update_total=False)
+            
+            log = {
+                'train': {'time': train_time, **train_summary}, 
+                'valid': {'time': valid_time, **valid_summary}, 
+                'total time': timer.total_time
+            }
+            epoch_logs.append({'run': run+1, 'epoch': epoch+1, **log})
+            
+    cols = ['valid_acc']
+    summary = epoch_logs.df().query('epoch==epoch.max()')[cols].describe().transpose().astype({'count': int})[
+        ['count', 'mean', 'min', 'max', 'std']]
+    print(summary)
+
+if __name__ == '__main__':
+    main()
 
