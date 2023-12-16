@@ -23,7 +23,7 @@ hyp = {
         'train_epochs': 10.0,
         'lr': 1.525 / 1024, # per example
         'momentum': 0.85,
-        'weight_decay': 2 * 6.687e-4 * 1024, # per batch
+        'weight_decay': 2 * 6.687e-4, # per example
         'bias_scaler': 64.0,
         'scaling_factor': 1/9,
         'loss_scale': 32,
@@ -400,6 +400,8 @@ def main(run):
     wd = hyp['opt']['weight_decay']
     bias_scaler = hyp['opt']['bias_scaler']
     loss_scale = hyp['opt']['loss_scale']
+    scaled_lr = (lr / loss_scale)
+    scaled_wd = (wd * loss_scale * batch_size)
 
     train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=batch_size, aug=train_augs)
     test_loader = PrepadCifarLoader('/tmp/cifar10', train=False, batch_size=2000)
@@ -414,8 +416,8 @@ def main(run):
 
     nonbias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' not in k]
     bias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' in k]
-    hyp_nonbias = dict(params=nonbias_params, lr=(lr / loss_scale), weight_decay=(wd * loss_scale))
-    hyp_bias = dict(params=bias_params, lr=(lr * bias_scaler / loss_scale), weight_decay=(wd * loss_scale / bias_scaler))
+    hyp_nonbias = dict(params=nonbias_params, lr=scaled_lr, weight_decay=scaled_wd)
+    hyp_bias = dict(params=bias_params, lr=scaled_lr*bias_scaler, weight_decay=scaled_wd/bias_scaler)
     optimizer = torch.optim.SGD([hyp_nonbias, hyp_bias], momentum=momentum, nesterov=True)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule.__getitem__)
 
