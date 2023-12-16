@@ -213,7 +213,7 @@ def eigens(patches):
 def init_net(net, train_images, eps=1e-2):
     eigenvalues, eigenvectors = eigens(patches(train_images))
     weight = eigenvectors / (eigenvalues+eps).sqrt()[:, None, None, None]
-    net[0].weight.data[:] = weight.half().cuda()
+    net[0].weight.data[:] = weight.half()
     net[0].weight.requires_grad = False
 
 def print_columns(columns_list, separator_left='|  ', separator_right='  ', final="|",
@@ -238,11 +238,13 @@ logging_columns_list = ['epoch', 'train_loss', 'val_loss', 'train_acc', 'val_acc
 def print_training_details(variables, is_final_entry):
     formatted = []
     for col in logging_columns_list:
-        if type(variables[col]) in (int, str):
-            res = str(variables[col])
-        elif type(variables[col]) is float:
-            res = '{:0.4f}'.format(variables[col])
+        var = variables[col]
+        if type(var) in (int, str):
+            res = str(var)
+        elif type(var) is float:
+            res = '{:0.4f}'.format(var)
         else:
+            assert var is None
             res = ''
         formatted.append(res.rjust(len(col)))
     print_columns(formatted, is_final_entry=is_final_entry)
@@ -253,14 +255,13 @@ def main():
     batch_size = 512
     ema_epochs = 2
 
-    loss_fn = nn.CrossEntropyLoss(label_smoothing=0.2, reduction='none')
-
     lr = 1.0 / 512
     momentum = 0.9
     wd = 5e-4 * 512
     bias_scaler = 64
-
     train_aug = dict(flip=True, translate=4)
+    loss_fn = nn.CrossEntropyLoss(label_smoothing=0.2, reduction='none')
+
     train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=batch_size, aug=train_aug)
     test_loader = PrepadCifarLoader('/tmp/cifar10', train=False, batch_size=1000)
 
@@ -282,8 +283,8 @@ def main():
     hyp_nonbias = dict(params=nonbias_params, lr=lr, weight_decay=wd)
     hyp_bias = dict(params=bias_params, lr=lr*bias_scaler, weight_decay=wd/bias_scaler)
     
-    opt = torch.optim.SGD([hyp_nonbias, hyp_bias], momentum=momentum, nesterov=True)
-    scheduler = torch.optim.lr_scheduler.LambdaLR(opt, sched.__getitem__)
+    optimizer = torch.optim.SGD([hyp_nonbias, hyp_bias], momentum=momentum, nesterov=True)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, sched.__getitem__)
     
     ## ema setup
     model_ema = copy.deepcopy(model)
@@ -304,12 +305,10 @@ def main():
         for inputs, labels in train_loader:
             
             outputs = model(inputs)
-    
             loss = loss_fn(outputs, labels).sum()
-            
-            opt.zero_grad(set_to_none=True)
+            optimizer.zero_grad(set_to_none=True)
             loss.backward()
-            opt.step()
+            optimizer.step()
             scheduler.step()
             
             ## ema update
@@ -358,6 +357,6 @@ def main():
 
 if __name__ == "__main__":
     print_columns(logging_columns_list, column_heads_only=True)
-    accs = torch.tensor([main() for _ in range(10)])
+    accs = torch.tensor([main() for _ in range(25)])
     print("Mean/std:", accs.mean().item(), accs.std().item())
 
