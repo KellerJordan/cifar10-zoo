@@ -99,7 +99,6 @@ class PrepadCifarLoader:
 
 
 import copy
-from tqdm import tqdm
 from itertools import count
 
 #############################################
