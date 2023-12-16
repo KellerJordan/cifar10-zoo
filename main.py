@@ -180,10 +180,9 @@ class ConvGroup(nn.Module):
         x = self.activ(x)
         return x
 
-class FastGlobalMaxPooling(nn.Module):
-    def forward(self, x):
-        # requires less time than AdaptiveMax2dPooling
-        return torch.amax(x, dim=(2,3))
+class Flatten(nn.Module):
+    def forward(self, x): 
+        return x.view(x.size(0), -1) 
 
 #############################################
 #            Network Definition             #
@@ -204,7 +203,8 @@ def make_net():
         ConvGroup(whiten_conv_depth, depths['block1']),
         ConvGroup(depths['block1'],  depths['block2']),
         ConvGroup(depths['block2'],  depths['block3']),
-        FastGlobalMaxPooling(),
+        nn.MaxPool2d(3),
+        Flatten(),
         nn.Linear(depths['block3'], depths['num_classes'], bias=False),
         Mul(hyp['opt']['scaling_factor']),
     )
