@@ -18,7 +18,7 @@ torch.backends.cudnn.benchmark = True
 hyp = {
     'opt': {
         'batch_size': 1024,
-        'train_epochs': 10.0,
+        'train_epochs': 9.6,
         'lr': 1.525 / 1024,         # learning rate per example
         'momentum': 0.85,
         'weight_decay': 1.3374e-3,  # weight decay per exmaple
@@ -141,9 +141,9 @@ class PrepadCifarLoader:
 #############################################
 
 class BatchNorm(nn.BatchNorm2d):
-    def __init__(self, num_features, eps=1e-12, momentum=(1 - hyp['net']['batch_norm_momentum']),
+    def __init__(self, num_features, eps=1e-12, momentum=hyp['net']['batch_norm_momentum'],
                  weight=False, bias=True):
-        super().__init__(num_features, eps=eps, momentum=momentum)
+        super().__init__(num_features, eps=eps, momentum=1-momentum)
         self.weight.data.fill_(1.0)
         self.bias.data.fill_(0.0)
         self.weight.requires_grad = weight
@@ -152,6 +152,8 @@ class BatchNorm(nn.BatchNorm2d):
 class Conv(nn.Conv2d):
     def __init__(self, in_channels, out_channels, kernel_size=3, padding='same', bias=False):
         super().__init__(in_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=bias)
+        if bias:
+            self.bias.data.fill_(0.0)
 
 class Mul(nn.Module):
     def __init__(self, temperature):
@@ -191,14 +193,14 @@ class Flatten(nn.Module):
 depths = {
     'block1': (1 * hyp['net']['base_depth']), # 64  w/ depth at base value
     'block2': (4 * hyp['net']['base_depth']), # 256 w/ depth at base value
-    'block3': (7 * hyp['net']['base_depth']), # 448 w/ depth at base value
+    'block3': (6 * hyp['net']['base_depth']), # 448 w/ depth at base value
     'num_classes': 10
 }
 
 def make_net():
     whiten_conv_depth = 2 * 3 * hyp['net']['whitening']['kernel_size']**2
     net = nn.Sequential(
-        Conv(3, whiten_conv_depth, kernel_size=hyp['net']['whitening']['kernel_size'], padding=0),
+        Conv(3, whiten_conv_depth, kernel_size=hyp['net']['whitening']['kernel_size'], padding=0, bias=True),
         nn.GELU(),
         ConvGroup(whiten_conv_depth, depths['block1']),
         ConvGroup(depths['block1'],  depths['block2']),
@@ -344,8 +346,9 @@ def main(run):
     model_ema = None
     current_steps = 0
 
-    nonbias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' not in k]
-    bias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' in k]
+    is_bias = lambda k: 'bias' in k and k != '0.bias'
+    nonbias_params = [p for k, p in model.named_parameters() if p.requires_grad and not is_bias(k)]
+    bias_params = [p for k, p in model.named_parameters() if p.requires_grad and is_bias(k)]
     hyp_nonbias = dict(params=nonbias_params, lr=scaled_lr, weight_decay=scaled_wd)
     hyp_bias = dict(params=bias_params, lr=scaled_lr*bias_scaler, weight_decay=scaled_wd/bias_scaler)
     optimizer = torch.optim.SGD([hyp_nonbias, hyp_bias], momentum=momentum, nesterov=True)
@@ -366,6 +369,9 @@ def main(run):
     total_time_seconds += 1e-3 * starter.elapsed_time(ender)
 
     for epoch in range(math.ceil(epochs)):
+
+        if epoch == 3:
+            model[0].bias.requires_grad = False
 
         ####################
         #     Training     #
