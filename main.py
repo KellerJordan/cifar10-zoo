@@ -19,10 +19,10 @@ hyp = {
     'opt': {
         'batch_size': 1024,
         'train_epochs': 9.6,
-        'lr': 1.525 / 1024,      # learning rate per example
+        'lr': 1.525 / 1024,     # learning rate per example
         'momentum': 0.85,
-        'weight_decay': 2.04e-3, # weight decay per step (will not be scaled up by lr)
-        'bias_scaler': 64.0,     # how much to scale up the learning rate (but not weight decay) for BatchNorm biases
+        'weight_decay': 2e-3,   # weight decay per step (will not be scaled up by lr)
+        'bias_scaler': 64.0,    # how much to scale up the learning rate (but not weight decay) for BatchNorm biases
         'scaling_factor': 1/9,
     },
     'aug': {
@@ -485,7 +485,7 @@ if __name__ == "__main__":
         code = f.read()
 
     print_columns(logging_columns_list, is_head=True)
-    accs = torch.tensor([main(run) for run in range(10)])
+    accs = torch.tensor([main(run) for run in range(25)])
     print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
     log = {'code': code, 'accs': accs}
