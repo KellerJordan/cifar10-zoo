@@ -248,14 +248,14 @@ def init_net(net, train_images):
         w1 = block.conv1.weight.data
         w2 = block.conv2.weight.data
 
-        std_pre, mean_pre = torch.std_mean(w1)
+        std_pre = w1.std()
 
         # Create an implicit residual via a dirac-initialized tensor
         torch.nn.init.dirac_(w1[:w1.size(1)])
         torch.nn.init.dirac_(w2)
 
         # Renormalize the weights to match the original initialization statistics
-        std_post, mean_post = torch.std_mean(w1)
+        std_post = w1.std()
         w1.div_(std_post).mul_(std_pre)
 
 ########################################
