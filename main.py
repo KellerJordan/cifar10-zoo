@@ -339,12 +339,17 @@ def main(run):
     model_ema = None
     current_steps = 0
 
-    is_bias = lambda k: 'bias' in k and k != '0.bias'
-    nonbias_params = [p for k, p in model.named_parameters() if p.requires_grad and not is_bias(k)]
-    bias_params = [p for k, p in model.named_parameters() if p.requires_grad and is_bias(k)]
-    hyp_nonbias = dict(params=nonbias_params, lr=lr, weight_decay=scaled_wd)
-    hyp_bias = dict(params=bias_params, lr=lr*bias_scaler, weight_decay=scaled_wd/bias_scaler)
-    optimizer = torch.optim.SGD([hyp_nonbias, hyp_bias], momentum=momentum, nesterov=True)
+    params = [(k, p) for k, p in model.named_parameters() if p.requires_grad]
+    norm_biases = [p for k, p in params if 'norm' in k]
+    conv_filters = [p for k, p in params if 'conv' in k]
+    whiten_bias = [p for k, p in params if k == '0.bias']
+    linear_weight = [p for k, p in params if k == '7.weight']
+
+    params_unscaled = dict(params=conv_filters+whiten_bias+linear_weight,
+                           lr=lr, weight_decay=scaled_wd)
+    params_scaled   = dict(params=norm_biases,
+                           lr=lr*bias_scaler, weight_decay=scaled_wd/bias_scaler)
+    optimizer = torch.optim.SGD([params_unscaled, params_scaled], momentum=momentum, nesterov=True)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule.__getitem__)
 
     ## For accurately timing GPU code
