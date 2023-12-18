@@ -244,24 +244,19 @@ def init_whitening_conv(layer, train_set, eps=5e-4):
 def init_net(net, train_images):
     init_whitening_conv(net[0], train_images)
     for block in net[2:5]:
-        # Create an implicit residual via a dirac-initialized tensor
-        dirac_weights_in = torch.nn.init.dirac_(torch.empty_like(block.conv1.weight))
 
-        # Add the implicit residual to the already-initialized convolutional transition layer.
-        # One can use more sophisticated initializations, but this one appeared worked best in testing.
-        # What this does is brings up the features from the previous residual block virtually, so not only 
-        # do we have residual information flow within each block, we have a nearly direct connection from
-        # the early layers of the network to the loss function.
-        std_pre, mean_pre = torch.std_mean(block.conv1.weight.data)
-        block.conv1.weight.data = block.conv1.weight.data + dirac_weights_in 
-        std_post, mean_post = torch.std_mean(block.conv1.weight.data)
+        w1 = block.conv1.weight.data
+        w2 = block.conv2.weight.data
+
+        std_pre, mean_pre = torch.std_mean(w1)
+
+        # Create an implicit residual via a dirac-initialized tensor
+        torch.nn.init.dirac_(w1[:w1.size(1)])
+        torch.nn.init.dirac_(w2)
 
         # Renormalize the weights to match the original initialization statistics
-        block.conv1.weight.data.sub_(mean_post).div_(std_post).mul_(std_pre).add_(mean_pre)
-
-        ## We do the same for the second layer in each convolution group block; this only adds a
-        ## simple multiplier to the inputs instead of the noise of a randomly-initialized convolution.
-        torch.nn.init.dirac_(block.conv2.weight)
+        std_post, mean_post = torch.std_mean(w1)
+        w1.div_(std_post).mul_(std_pre)
 
 ########################################
 #                 EMA                  #
