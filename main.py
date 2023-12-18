@@ -19,10 +19,10 @@ hyp = {
     'opt': {
         'batch_size': 1024,
         'train_epochs': 9.6,
-        'lr': 1.525 / 1024,         # learning rate per example
+        'lr': 1.525 / 1024,        # learning rate per example
         'momentum': 0.85,
-        'weight_decay': 1.3374e-3,  # weight decay per exmaple
-        'bias_scaler': 64.0,        # how much to scale up the learning rate (but not weight decay) for BatchNorm biases
+        'weight_decay': 1.3374e-3, # weight decay per example
+        'bias_scaler': 64.0,       # how much to scale up the learning rate (but not weight decay) for BatchNorm biases
         'scaling_factor': 1/9,
     },
     'aug': {
