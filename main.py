@@ -19,10 +19,10 @@ hyp = {
     'opt': {
         'batch_size': 1024,
         'train_epochs': 9.6,
-        'lr': 1.525 / 1024,        # learning rate per example
+        'lr': 1.525 / 1024,      # learning rate per example
         'momentum': 0.85,
-        'weight_decay': 1.3374e-3, # weight decay per example
-        'bias_scaler': 64.0,       # how much to scale up the learning rate (but not weight decay) for BatchNorm biases
+        'weight_decay': 2.04e-3, # weight decay per step (will not be scaled up by lr)
+        'bias_scaler': 64.0,     # how much to scale up the learning rate (but not weight decay) for BatchNorm biases
         'scaling_factor': 1/9,
     },
     'aug': {
@@ -333,7 +333,7 @@ def main(run):
                             [0, int(0.23 * total_train_steps), total_train_steps],
                             [0.2, 1, 0.07]) 
 
-    scaled_wd = wd * batch_size
+    scaled_wd = wd / lr
 
     model = make_net()
     model_ema = None
@@ -485,7 +485,7 @@ if __name__ == "__main__":
         code = f.read()
 
     print_columns(logging_columns_list, is_head=True)
-    accs = torch.tensor([main(run) for run in range(25)])
+    accs = torch.tensor([main(run) for run in range(10)])
     print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
     log = {'code': code, 'accs': accs}
