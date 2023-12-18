@@ -333,9 +333,7 @@ def main(run):
                             [0, int(0.23 * total_train_steps), total_train_steps],
                             [0.2, 1, 0.07]) 
 
-    loss_scale = 32.
-    scaled_lr = (lr / loss_scale)
-    scaled_wd = (wd * loss_scale * batch_size)
+    scaled_wd = wd * batch_size
 
     model = make_net()
     model_ema = None
@@ -344,8 +342,8 @@ def main(run):
     is_bias = lambda k: 'bias' in k and k != '0.bias'
     nonbias_params = [p for k, p in model.named_parameters() if p.requires_grad and not is_bias(k)]
     bias_params = [p for k, p in model.named_parameters() if p.requires_grad and is_bias(k)]
-    hyp_nonbias = dict(params=nonbias_params, lr=scaled_lr, weight_decay=scaled_wd)
-    hyp_bias = dict(params=bias_params, lr=scaled_lr*bias_scaler, weight_decay=scaled_wd/bias_scaler)
+    hyp_nonbias = dict(params=nonbias_params, lr=lr, weight_decay=scaled_wd)
+    hyp_bias = dict(params=bias_params, lr=lr*bias_scaler, weight_decay=scaled_wd/bias_scaler)
     optimizer = torch.optim.SGD([hyp_nonbias, hyp_bias], momentum=momentum, nesterov=True)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule.__getitem__)
 
@@ -380,7 +378,7 @@ def main(run):
             outputs = model(inputs)
             loss = loss_fn(outputs, labels).sum()
             optimizer.zero_grad(set_to_none=True)
-            (loss_scale * loss).backward()
+            loss.backward()
             optimizer.step()
             scheduler.step()
 
