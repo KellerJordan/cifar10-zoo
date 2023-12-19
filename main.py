@@ -171,8 +171,16 @@ class ConvGroup(nn.Module):
         self.conv2 = Conv(channels_out, channels_out)
         self.norm2 = BatchNorm(channels_out)
         self.activ = nn.GELU()
+        self.init()
 
-    def forward(self, x):
+    def init(self):
+        # Create an implicit residual via dirac-initialized tensors
+        w1 = self.conv1.weight.data
+        w2 = self.conv2.weight.data
+        torch.nn.init.dirac_(w1[:w1.size(1)])
+        torch.nn.init.dirac_(w2)
+
+    def forward(self, x): 
         x = self.conv1(x)
         x = self.pool(x)
         x = self.norm1(x)
@@ -240,23 +248,6 @@ def init_whitening_conv(layer, train_set, eps=5e-4):
     eigenvectors_scaled = eigenvectors / torch.sqrt(eigenvalues + eps)
     layer.weight.data[:] = torch.cat((eigenvectors_scaled, -eigenvectors_scaled))
     layer.weight.requires_grad = False
-
-def init_net(net, train_images):
-    init_whitening_conv(net[0], train_images)
-    for block in net[2:5]:
-
-        w1 = block.conv1.weight.data
-        w2 = block.conv2.weight.data
-
-        std_pre = w1.std()
-
-        # Create an implicit residual via a dirac-initialized tensor
-        torch.nn.init.dirac_(w1[:w1.size(1)])
-        torch.nn.init.dirac_(w2)
-
-        # Renormalize the weights to match the original initialization statistics
-        std_post = w1.std()
-        w1.div_(std_post).mul_(std_pre)
 
 ########################################
 #                 EMA                  #
@@ -361,7 +352,7 @@ def main(run):
     ## Initialize the whitening layer using training images
     starter.record()
     train_images = train_loader.normalize(train_loader.images[:5000])
-    init_net(model, train_images)
+    init_whitening_conv(model[0], train_images)
     ender.record()
     torch.cuda.synchronize()
     total_time_seconds += 1e-3 * starter.elapsed_time(ender)
