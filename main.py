@@ -153,7 +153,7 @@ class Conv(nn.Conv2d):
     def __init__(self, in_channels, out_channels, kernel_size=3, padding='same', bias=False):
         super().__init__(in_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=bias)
         if bias:
-            self.bias.data.fill_(0.0)
+            self.bias.data.zero_()
 
 class Mul(nn.Module):
     def __init__(self, temperature):
@@ -180,7 +180,7 @@ class ConvGroup(nn.Module):
         torch.nn.init.dirac_(w1[:w1.size(1)])
         torch.nn.init.dirac_(w2)
 
-    def forward(self, x): 
+    def forward(self, x):
         x = self.conv1(x)
         x = self.pool(x)
         x = self.norm1(x)
