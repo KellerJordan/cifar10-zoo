@@ -324,8 +324,6 @@ def main(run):
                             [0, int(0.23 * total_train_steps), total_train_steps],
                             [0.2, 1, 0.07]) 
 
-    scaled_wd = wd / lr
-
     model = make_net()
     model_ema = None
     current_steps = 0
@@ -337,9 +335,9 @@ def main(run):
     linear_weight = [p for k, p in params if k == '7.weight']
 
     params_unscaled = dict(params=conv_filters+whiten_bias+linear_weight,
-                           lr=lr, weight_decay=scaled_wd)
+                           lr=lr, weight_decay=(wd / lr))
     params_scaled   = dict(params=norm_biases,
-                           lr=lr*bias_scaler, weight_decay=scaled_wd/bias_scaler)
+                           lr=lr*bias_scaler, weight_decay=(wd / (lr*bias_scaler)))
     optimizer = torch.optim.SGD([params_unscaled, params_scaled], momentum=momentum, nesterov=True)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule.__getitem__)
 
