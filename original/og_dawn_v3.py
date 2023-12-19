@@ -333,100 +333,6 @@ class Const(namedtuple('Const', ['val'])):
         return self.val
 
 #####################
-## DATA
-##################### 
-
-import torchvision
-from functools import lru_cache as cache
-
-@cache(None)
-def cifar10(root='./data'):
-    download = lambda train: torchvision.datasets.CIFAR10(root=root, train=train, download=True)
-    return {k: {'data': torch.tensor(v.data), 'targets': torch.tensor(v.targets)} 
-            for k,v in [('train', download(True)), ('valid', download(False))]}
-  
-cifar10_mean, cifar10_std = [
-    (125.31, 122.95, 113.87), # equals np.mean(cifar10()['train']['data'], axis=(0,1,2)) 
-    (62.99, 62.09, 66.70), # equals np.std(cifar10()['train']['data'], axis=(0,1,2))
-]
-
-#####################
-## data preprocessing
-#####################
-mean, std = [torch.tensor(x, device=device, dtype=torch.float16) for x in (cifar10_mean, cifar10_std)]
-
-normalise = lambda data, mean=mean, std=std: (data - mean)/std
-unnormalise = lambda data, mean=mean, std=std: data*std + mean
-pad = lambda data, border: nn.ReflectionPad2d(border)(data)
-transpose = lambda x, source='NHWC', target='NCHW': x.permute([source.index(d) for d in target]) 
-to = lambda *args, **kwargs: (lambda x: x.to(*args, **kwargs))
-
-def preprocess(dataset, transforms):
-    dataset = copy.copy(dataset)
-    for transform in reversed(transforms):
-        dataset['data'] = transform(dataset['data'])
-    return dataset
-
-#####################
-## Data augmentation
-#####################
-
-chunks = lambda data, splits: (data[start:end] for (start, end) in zip(splits, splits[1:]))
-
-even_splits = lambda N, num_chunks: np.cumsum([0] + [(N//num_chunks)+1]*(N % num_chunks)  + [N//num_chunks]*(num_chunks - (N % num_chunks)))
-
-def shuffled(xs, inplace=False):
-    xs = xs if inplace else copy.copy(xs) 
-    np.random.shuffle(xs)
-    return xs
-
-def transformed(data, targets, transform, max_options=None, unshuffle=False):
-    i = torch.randperm(len(data), device=device)
-    data = data[i]
-    options = shuffled(transform.options(data.shape), inplace=True)[:max_options]
-    data = torch.cat([transform.apply(x, **choice) for choice, x in zip(options, chunks(data, even_splits(len(data), len(options))))])
-    return (data[torch.argsort(i)], targets) if unshuffle else (data, targets[i])
-
-class Batches():
-    def __init__(self, batch_size, transforms=(), dataset=None, shuffle=True, drop_last=False, max_options=None):
-        self.dataset, self.transforms, self.shuffle, self.max_options = dataset, transforms, shuffle, max_options
-        N = len(dataset['data'])
-        self.splits = list(range(0, N+1, batch_size))
-        if not drop_last and self.splits[-1] != N:
-            self.splits.append(N)
-     
-    def __iter__(self):
-        data, targets = self.dataset['data'], self.dataset['targets']
-        for transform in self.transforms:
-            data, targets = transformed(data, targets, transform, max_options=self.max_options, unshuffle=not self.shuffle)
-        if self.shuffle:
-            i = torch.randperm(len(data), device=device)
-            data, targets = data[i], targets[i]
-        return ({'input': x.clone(), 'target': y} for (x, y) in zip(chunks(data, self.splits), chunks(targets, self.splits)))
-    
-    def __len__(self): 
-        return len(self.splits) - 1
-    
-#####################
-## Augmentations
-#####################
-
-class Crop(namedtuple('Crop', ('h', 'w'))):
-    def apply(self, x, x0, y0):
-        return x[..., y0:y0+self.h, x0:x0+self.w] 
-
-    def options(self, shape):
-        *_, H, W = shape
-        return [{'x0': x0, 'y0': y0} for x0 in range(W+1-self.w) for y0 in range(H+1-self.h)]
-    
-class FlipLR(namedtuple('FlipLR', ())):
-    def apply(self, x, choice):
-        return flip_lr(x) if choice else x 
-        
-    def options(self, shape):
-        return [{'choice': b} for b in [True, False]]
-
-#####################
 ## TRAINING
 #####################
 
@@ -640,32 +546,8 @@ label_smoothing_loss = lambda alpha: Network({
 ## Misc
 #####################
 
-lr_schedule = lambda knots, vals, batch_size: PiecewiseLinear(np.array(knots)*len(train_batches(batch_size)), np.array(vals)/batch_size)
+lr_schedule = lambda knots, vals, batch_size: PiecewiseLinear(np.array(knots)*len(train_loader), np.array(vals)/batch_size)
 
-
-
-
-
-
-
-
-
-#####################
-## timings
-#####################
-dataset = cifar10() #downloads dataset
-print('Starting timer')
-t = Timer(synch=torch.cuda.synchronize)
-dataset = map_nested(to(device), dataset)
-print(f'Transfer to GPU:\t{t():.3f}s')
-train_set = preprocess(dataset['train'], [partial(pad, border=4), transpose, normalise, to(torch.float16)])
-valid_set = preprocess(dataset['valid'], [transpose, normalise, to(torch.float16)])
-print(f'Data preprocessing:\t{t():.3f}s')
-map_nested(to(cpu), {'train': train_set, 'valid': valid_set})
-print(f'Transfer to CPU:\t{t():.3f}s')
-
-train_batches = partial(Batches, dataset=train_set, shuffle=True,  drop_last=True, max_options=200)
-valid_batches = partial(Batches, dataset=valid_set, shuffle=False, drop_last=False)
 
 def cov(X):
     X = X/np.sqrt(X.size(0) - 1)
@@ -682,7 +564,8 @@ def eigens(patches):
     Λ, V = torch.linalg.eigh(Σ)
     return Λ.flip(0), V.t().reshape(c*h*w, c, h, w).flip(0)
 
-Λ, V = eigens(patches(train_set['data'][:10000,:,4:-4,4:-4])) #center crop to remove padding
+train_images = train_loader.normalize(train_loader.images)[:10000]
+Λ, V = eigens(patches(train_images)) #center crop to remove padding
 
 def whitening_block(c_in, c_out, Λ=None, V=None, eps=1e-2):
     filt = nn.Conv2d(3, 27, kernel_size=(3,3), padding=(1,1), bias=False)
@@ -704,7 +587,6 @@ input_whitening_net = network(conv_pool_block=conv_pool_block_pre, prep_block=pa
 valid_steps_tta = (forward_tta([identity, flip_lr]), log_activations(('loss', 'acc')))
 
 epochs, batch_size, ema_epochs=10, 512, 2
-transforms = (Crop(32, 32), FlipLR())
 opt_params = {'lr': lr_schedule([0, epochs/5, epochs - ema_epochs], [0.0, 1.0, 0.1], batch_size), 'weight_decay': Const(5e-4*batch_size), 'momentum': Const(0.9)}
 opt_params_bias = {'lr': lr_schedule([0, epochs/5, epochs - ema_epochs], [0.0, 1.0*64, 0.1*64], batch_size), 'weight_decay': Const(5e-4*batch_size/64), 'momentum': Const(0.9)}
 
