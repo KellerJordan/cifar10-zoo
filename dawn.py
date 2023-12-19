@@ -265,9 +265,9 @@ def main(run):
     epochs = 10
     batch_size = 512
 
-    lr = 1.0 / 512
+    lr = 1.0 / 512 # per example
     momentum = 0.9
-    wd = 5e-4 * 512
+    wd = 5e-4 # per step
     bias_scaler = 64
     loss_fn = nn.CrossEntropyLoss(label_smoothing=0.2, reduction='none')
 
@@ -296,8 +296,8 @@ def main(run):
     ## optimizer setup
     nonbias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' not in k]
     bias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' in k]
-    hyp_nonbias = dict(params=nonbias_params, lr=lr, weight_decay=wd)
-    hyp_bias = dict(params=bias_params, lr=lr*bias_scaler, weight_decay=wd/bias_scaler)
+    hyp_nonbias = dict(params=nonbias_params, lr=lr, weight_decay=(wd / lr))
+    hyp_bias = dict(params=bias_params, lr=lr*bias_scaler, weight_decay=(wd / (lr*bias_scaler)))
     
     optimizer = torch.optim.SGD([hyp_nonbias, hyp_bias], momentum=momentum, nesterov=True)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, sched.__getitem__)
