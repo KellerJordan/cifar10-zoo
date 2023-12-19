@@ -1,3 +1,15 @@
+# dawnbench_dcpage.py
+# This script aims for exact equivalence to the final training procedure presented in David C. Page's post
+# https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/.
+#
+# It runs in 15 seconds on an NVIDIA A100, and yields a mean accuracy of 94.07% (across n=100 runs, in one test).
+#
+# It should be exactly equivalent to the final (10-epoch) training code given in
+# https://github.com/davidcpage/cifar10-fast/blob/master/bag_of_tricks.ipynb, with the one exception being that
+# we use the default Pytorch nesterov SGD, whereas the notebook uses a custom nesterov SGD which has a small bug.
+#
+# The print-logging and code layout are inspired by https://github.com/tysam-code/hlb-CIFAR10.
+
 import copy
 from itertools import count
 import numpy as np
@@ -111,7 +123,7 @@ class PrepadCifarLoader:
 #############################################
 
 class BatchNorm(nn.BatchNorm2d):
-    def __init__(self, num_features, eps=1e-05, momentum=0.1, weight=True, bias=True):
+    def __init__(self, num_features, eps=1e-05, momentum=0.1, weight=False, bias=True):
         super().__init__(num_features, eps=eps, momentum=momentum)
         self.weight.data.fill_(1.0)
         self.bias.data.fill_(0.0)
@@ -170,7 +182,7 @@ def make_net():
                          kernel_size=kernel_size, stride=1,
                          padding=padding, bias=False)
     act = nn.CELU(0.3)
-    bn = lambda channels: GhostBatchNorm(channels, num_splits=16, weight=False)
+    bn = lambda channels: GhostBatchNorm(channels, num_splits=16)
 
     net = nn.Sequential(
         conv(3, 27), # <-- this is the fixed whitening layer
