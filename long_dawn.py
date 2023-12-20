@@ -266,7 +266,7 @@ def main(run):
     epochs = 80
     batch_size = 512
 
-    lr = 0.4 / 512 # per example
+    lr = 0.4 # per step
     momentum = 0.9
     wd = 5e-4 # per step
     bias_scaler = 64
@@ -297,8 +297,8 @@ def main(run):
     ## optimizer setup
     nonbias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' not in k]
     bias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' in k]
-    hyp_nonbias = dict(params=nonbias_params, lr=lr, weight_decay=wd * batch_size)
-    hyp_bias = dict(params=bias_params, lr=lr*bias_scaler, weight_decay=wd * batch_size/bias_scaler)
+    hyp_nonbias = dict(params=nonbias_params, lr=lr / batch_size, weight_decay=wd * batch_size)
+    hyp_bias = dict(params=bias_params, lr=lr*bias_scaler / batch_size, weight_decay=(wd * batch_size / bias_scaler))
     
     optimizer = torch.optim.SGD([hyp_nonbias, hyp_bias], momentum=momentum, nesterov=True)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, sched.__getitem__)
