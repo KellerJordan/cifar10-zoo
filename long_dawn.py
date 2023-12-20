@@ -183,7 +183,6 @@ def make_net():
                          padding=padding, bias=False)
     act = nn.CELU(0.3)
     bn = lambda channels: GhostBatchNorm(channels, num_splits=16)
-    #bn = lambda channels: BatchNorm(channels)
 
     net = nn.Sequential(
         conv(3, 27), # <-- this is the fixed whitening layer
@@ -266,9 +265,9 @@ def main(run):
     epochs = 80
     batch_size = 512
 
-    lr = 0.4 # per step
+    lr = 0.4
     momentum = 0.9
-    wd = 5e-4 # per step
+    wd = 5e-4
     bias_scaler = 64
     loss_fn = nn.CrossEntropyLoss(label_smoothing=0.2, reduction='none')
 
@@ -297,8 +296,8 @@ def main(run):
     ## optimizer setup
     nonbias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' not in k]
     bias_params = [p for k, p in model.named_parameters() if p.requires_grad and 'bias' in k]
-    hyp_nonbias = dict(params=nonbias_params, lr=lr / batch_size, weight_decay=wd * batch_size)
-    hyp_bias = dict(params=bias_params, lr=lr*bias_scaler / batch_size, weight_decay=(wd * batch_size / bias_scaler))
+    hyp_nonbias = dict(params=nonbias_params, lr=(lr / batch_size), weight_decay=(wd * batch_size))
+    hyp_bias = dict(params=bias_params, lr=(lr * bias_scaler/batch_size), weight_decay=(wd * batch_size/bias_scaler))
     
     optimizer = torch.optim.SGD([hyp_nonbias, hyp_bias], momentum=momentum, nesterov=True)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, sched.__getitem__)
