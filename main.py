@@ -256,19 +256,17 @@ def init_whitening_conv(layer, train_set, eps=5e-4):
 #                 EMA                  #
 ########################################
 
-class NetworkEMA(nn.Module):
+class LookaheadEMA(nn.Module):
     def __init__(self, net):
         super().__init__()
         self.net_ema = copy.deepcopy(net).eval()
 
     def update(self, net, decay):
-        with torch.no_grad():
-            for net_ema_param, (param_name, net_param) in zip(self.net_ema.state_dict().values(), net.state_dict().items()):
-                if net_param.dtype in (torch.half, torch.float):
-                    net_ema_param.lerp_(net_param.detach(), 1-decay)
-                    # And then we also copy the parameters back to the network, similarly to the Lookahead optimizer (but with a much more aggressive-at-the-end schedule)
-                    if not 'whiten' in param_name:
-                        net_param.copy_(net_ema_param.detach())
+        for ema_param, net_param in zip(self.net_ema.state_dict().values(), net.state_dict().values()):
+            if net_param.dtype in (torch.half, torch.float):
+                ema_param.lerp_(net_param, 1-decay)
+                # copy the ema parameters back to the network, similarly to the Lookahead optimizer
+                net_param.copy_(ema_param)
 
     def forward(self, inputs):
         return self.net_ema(inputs)
@@ -383,7 +381,7 @@ def main(run):
 
             if epoch >= hyp['opt']['ema']['start_epochs'] and current_steps % hyp['opt']['ema']['every_n_steps'] == 0:          
                 if model_ema is None:
-                    model_ema = NetworkEMA(model)
+                    model_ema = LookaheadEMA(model)
                 else:
                     # We warm up our ema's decay/momentum value over training (this lets us move fast, then average strongly at the end).
                     base_rho = hyp['opt']['ema']['decay_base'] ** hyp['opt']['ema']['every_n_steps']
