@@ -443,34 +443,34 @@ def main(run):
         test_images = test_loader.normalize(test_loader.images)
         test_labels = test_loader.labels
 
-        if hyp['net']['tta_level'] == 0:
-            logits_tta = torch.cat([model_ema(inputs)
-                                    for inputs in test_images.split(2000)])
+        def infer_basic(inputs, net):
+            return net(inputs)
 
-        elif hyp['net']['tta_level'] == 1:
-            logits_tta = torch.cat([0.5 * model_ema(inputs) + 0.5 * model_ema(inputs.flip(-1))
-                                    for inputs in test_images.split(2000)])
+        def infer_mirror(inputs, net):
+            return 0.5 * net(inputs) + 0.5 * net(inputs.flip(-1))
 
-        elif hyp['net']['tta_level'] == 2:
+        def infer_mirror_jitter(inputs, net):
+            logits = infer_mirror(inputs, net)
             pad = 1
-            padded_images = F.pad(test_images, (pad,)*4, 'reflect')
-            images_tta = torch.cat([
-                test_images,
-                padded_images[:, :, 0:32, 0:32],
-                padded_images[:, :, 0:32, 2:34],
-                padded_images[:, :, 2:34, 0:32],
-                padded_images[:, :, 2:34, 2:34],
-            ])
-            outputs_list = []
-            for inputs in images_tta.split(2000):
-                outputs = 0.5 * model_ema(inputs) + 0.5 * model_ema(inputs.flip(-1))
-                outputs_list.append(outputs)
-            outputs = torch.cat(outputs_list).view(-1, len(test_labels), 10)
+            padded_inputs = F.pad(inputs, (pad,)*4, 'reflect')
+            inputs_jitter_list = [
+                padded_inputs[:, :, 0:32, 0:32],
+                padded_inputs[:, :, 0:32, 2:34],
+                padded_inputs[:, :, 2:34, 0:32],
+                padded_inputs[:, :, 2:34, 2:34],
+            ]
+            logits_jitter_list = [infer_mirror(inputs_jitter, net) for inputs_jitter in inputs_jitter_list]
+            logits_jitter = torch.stack(logits_jitter_list).mean(0)
+            return 0.5 * logits + 0.5 * logits_jitter
             
-            logits_mirror = outputs[0]
-            logits_mirror_jitter = outputs[1:].mean(0)
-            logits_tta = (0.5 * logits_mirror + 0.5 * logits_mirror_jitter)
+        if hyp['net']['tta_level'] == 0:
+            infer_fn = infer_basic
+        elif hyp['net']['tta_level'] == 1:
+            infer_fn = infer_mirror
+        elif hyp['net']['tta_level'] == 2:
+            infer_fn = infer_mirror_jitter
 
+        logits_tta = torch.cat([infer_fn(inputs, model_ema) for inputs in test_images.split(2000)])
         tta_ema_val_acc = (logits_tta.argmax(1) == test_labels).float().mean().item()
 
     ender.record()
