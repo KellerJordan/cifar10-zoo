@@ -22,18 +22,21 @@ hyp = {
         'lr': 1.0 / 1024,       # learning rate per example
         'momentum': 0.85,
         'weight_decay': 2e-3,   # weight decay per step (will not be scaled up by lr)
-        'bias_scaler': 64.0,    # how much to scale up the learning rate (but not weight decay) for BatchNorm biases
-        'scaling_factor': 1/9,
+        'bias_scaler': 64.0,    # how much to scale up learning rate (but not weight decay) for BatchNorm biases
+        'label_smoothing': 0.2,
     },
     'aug': {
+        'flip': True,
         'translate': 2,
     },
     'net': {
         'whitening': {
             'kernel_size': 2,
         },
-        'batch_norm_momentum': 0.6,
+        'batchnorm_momentum': 0.6,
         'base_depth': 64,
+        'scaling_factor': 1/9,
+        'tta_level': 2,         # The level of test-time augmentation. 0=none, 1=flip, 2=flip+jitter. More TTA takes longer but gives higher accuracy.
     },
 }
 
@@ -135,7 +138,7 @@ class PrepadCifarLoader:
 #############################################
 
 class BatchNorm(nn.BatchNorm2d):
-    def __init__(self, num_features, eps=1e-12, momentum=hyp['net']['batch_norm_momentum'],
+    def __init__(self, num_features, eps=1e-12, momentum=hyp['net']['batchnorm_momentum'],
                  weight=False, bias=True):
         super().__init__(num_features, eps=eps, momentum=1-momentum)
         self.weight.data.fill_(1.0)
@@ -168,7 +171,7 @@ class ConvGroup(nn.Module):
         self.init()
 
     def init(self):
-        # Create an implicit residual via dirac-initialized tensors
+        # Create an implicit residual via partial identity initialization
         w1 = self.conv1.weight.data
         w2 = self.conv2.weight.data
         torch.nn.init.dirac_(w1[:w1.size(1)])
@@ -195,7 +198,7 @@ class Flatten(nn.Module):
 depths = {
     'block1': (1 * hyp['net']['base_depth']), # 64  w/ depth at base value
     'block2': (4 * hyp['net']['base_depth']), # 256 w/ depth at base value
-    'block3': (8 * hyp['net']['base_depth']), # 512 w/ depth at base value
+    'block3': (6 * hyp['net']['base_depth']), # 384 w/ depth at base value
     'num_classes': 10
 }
 
@@ -210,7 +213,7 @@ def make_net():
         nn.MaxPool2d(3),
         Flatten(),
         nn.Linear(depths['block3'], depths['num_classes'], bias=False),
-        Mul(hyp['opt']['scaling_factor']),
+        Mul(hyp['net']['scaling_factor']),
     )
     net = net.cuda()
     net = net.to(memory_format=torch.channels_last)
@@ -262,7 +265,7 @@ logging_columns_list = ['run', 'epoch', 'train_loss', 'val_loss', 'train_acc', '
 def print_training_details(variables, is_final_entry):
     formatted = []
     for col in logging_columns_list:
-        var = variables[col]
+        var = variables.get(col, None)
         if type(var) in (int, str):
             res = str(var)
         elif type(var) is float:
@@ -286,8 +289,8 @@ def main(run):
     wd = hyp['opt']['weight_decay']
     bias_scaler = hyp['opt']['bias_scaler']
 
-    train_augs = dict(flip=True, translate=hyp['aug']['translate'])
-    loss_fn = nn.CrossEntropyLoss(label_smoothing=0.2, reduction='none')
+    train_augs = dict(flip=hyp['aug']['flip'], translate=hyp['aug']['translate'])
+    loss_fn = nn.CrossEntropyLoss(label_smoothing=hyp['opt']['label_smoothing'], reduction='none')
 
     train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=batch_size, aug=train_augs)
     test_loader = PrepadCifarLoader('/tmp/cifar10', train=False, batch_size=2000)
@@ -295,10 +298,10 @@ def main(run):
     total_train_steps = math.ceil(len(train_loader) * epochs)
     lr_schedule = np.interp(np.arange(1+total_train_steps),
                             [0, int(0.2 * total_train_steps), total_train_steps],
-                            [0.2, 1, 0]) 
+                            [0.2, 1, 0]) # Linear warmup then annealing schedule
 
     model = make_net()
-    current_steps = 0 
+    current_steps = 0
 
     params = [(k, p) for k, p in model.named_parameters() if p.requires_grad]
     norm_biases = [p for k, p in params if 'norm' in k]
@@ -309,7 +312,7 @@ def main(run):
     params_unscaled = dict(params=conv_filters+whiten_bias+linear_weight,
                            lr=lr, weight_decay=(wd / lr))
     params_scaled   = dict(params=norm_biases,
-                           lr=lr*bias_scaler, weight_decay=(wd / (lr * bias_scaler)))
+                           lr=lr*bias_scaler, weight_decay=(wd / (lr*bias_scaler)))
     optimizer = torch.optim.SGD([params_unscaled, params_scaled], momentum=momentum, nesterov=True)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule.__getitem__)
 
@@ -346,7 +349,6 @@ def main(run):
             scheduler.step()
 
             current_steps += 1
-
             if current_steps >= total_train_steps:
                 break
 
@@ -364,19 +366,72 @@ def main(run):
 
         model.eval()
         with torch.no_grad():
-            loss_list, acc_list, acc_list_tta = [], [], []
+            loss_list, acc_list = [], []
             for inputs, labels in test_loader:
                 outputs = model(inputs)
-                outputs_tta = 0.5 * outputs + 0.5 * model(inputs.flip(-1))
                 loss_list.append(loss_fn(outputs, labels).float().mean())
                 acc_list.append((outputs.argmax(1) == labels).float().mean())
-                acc_list_tta.append((outputs_tta.argmax(1) == labels).float().mean())
             val_acc = torch.stack(acc_list).mean().item()
-            tta_val_acc = torch.stack(acc_list_tta).mean().item()
             val_loss = torch.stack(loss_list).mean().item()
+        tta_val_acc = None
 
-        print_training_details(locals(), is_final_entry=(epoch == math.ceil(epochs)-1))
+        print_training_details(locals(), is_final_entry=False)
         run = None # Only print the run number once
+
+    ####################
+    #  TTA Evaluation  #
+    ####################
+
+    starter.record()
+
+    with torch.no_grad():
+
+        ## Test-time augmentation strategy (for tta_level=2):
+        ## 1. Flip (/"mirror") the image left-to-right (50% of the time).
+        ## 2. Translate (/"jitter") the image by one pixel in any direction (50% of the time, i.e. both happen 25% of the time).
+        ##
+        ## This creates 8 inputs per image (left/right times the four directions),
+        ## which we evaluate and then weight according to the given probabilities.
+
+        test_images = test_loader.normalize(test_loader.images)
+        test_labels = test_loader.labels
+
+        def infer_basic(inputs, net):
+            return net(inputs)
+
+        def infer_mirror(inputs, net):
+            return 0.5 * net(inputs) + 0.5 * net(inputs.flip(-1))
+
+        def infer_mirror_jitter(inputs, net):
+            logits = infer_mirror(inputs, net)
+            pad = 1
+            padded_inputs = F.pad(inputs, (pad,)*4, 'reflect')
+            inputs_jitter_list = [
+                padded_inputs[:, :, 0:32, 0:32],
+                padded_inputs[:, :, 0:32, 2:34],
+                padded_inputs[:, :, 2:34, 0:32],
+                padded_inputs[:, :, 2:34, 2:34],
+            ]
+            logits_jitter_list = [infer_mirror(inputs_jitter, net) for inputs_jitter in inputs_jitter_list]
+            logits_jitter = torch.stack(logits_jitter_list).mean(0)
+            return 0.5 * logits + 0.5 * logits_jitter
+            
+        if hyp['net']['tta_level'] == 0:
+            infer_fn = infer_basic
+        elif hyp['net']['tta_level'] == 1:
+            infer_fn = infer_mirror
+        elif hyp['net']['tta_level'] == 2:
+            infer_fn = infer_mirror_jitter
+
+        logits_tta = torch.cat([infer_fn(inputs, model) for inputs in test_images.split(2000)])
+        tta_val_acc = (logits_tta.argmax(1) == test_labels).float().mean().item()
+
+    ender.record()
+    torch.cuda.synchronize()
+    total_time_seconds += 1e-3 * starter.elapsed_time(ender)
+
+    epoch = 'eval'
+    print_training_details(locals(), is_final_entry=True)
 
     return tta_val_acc
 
