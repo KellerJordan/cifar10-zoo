@@ -22,24 +22,27 @@ hyp = {
         'lr': 1.5 / 1024,       # learning rate per example
         'momentum': 0.85,
         'weight_decay': 2e-3,   # weight decay per step (will not be scaled up by lr)
-        'bias_scaler': 64.0,    # how much to scale up the learning rate (but not weight decay) for BatchNorm biases
-        'scaling_factor': 1/9,
+        'bias_scaler': 64.0,    # how much to scale up learning rate (but not weight decay) for BatchNorm biases
+        'label_smoothing': 0.2,
+        'ema': {
+            'start_epochs': 2,
+            'decay_base': 0.95,
+            'decay_pow': 3.,
+            'every_n_steps': 5,
+        },
     },
     'aug': {
+        'flip': True,
         'translate': 2,
     },
     'net': {
         'whitening': {
             'kernel_size': 2,
         },
-        'batch_norm_momentum': 0.6,
+        'batchnorm_momentum': 0.6,
         'base_depth': 64,
-    },
-    'ema': {
-        'start_epochs': 2,
-        'decay_base': 0.95,
-        'decay_pow': 3.,
-        'every_n_steps': 5,
+        'scaling_factor': 1/9,
+        'tta_level': 2,         # The level of test-time augmentation. 0=none, 1=flip, 2=flip+jitter. More TTA takes longer but gives higher accuracy.
     },
 }
 
@@ -141,7 +144,7 @@ class PrepadCifarLoader:
 #############################################
 
 class BatchNorm(nn.BatchNorm2d):
-    def __init__(self, num_features, eps=1e-12, momentum=hyp['net']['batch_norm_momentum'],
+    def __init__(self, num_features, eps=1e-12, momentum=hyp['net']['batchnorm_momentum'],
                  weight=False, bias=True):
         super().__init__(num_features, eps=eps, momentum=1-momentum)
         self.weight.data.fill_(1.0)
@@ -216,7 +219,7 @@ def make_net():
         nn.MaxPool2d(3),
         Flatten(),
         nn.Linear(depths['block3'], depths['num_classes'], bias=False),
-        Mul(hyp['opt']['scaling_factor']),
+        Mul(hyp['net']['scaling_factor']),
     )
     net = net.cuda()
     net = net.to(memory_format=torch.channels_last)
@@ -289,7 +292,7 @@ logging_columns_list = ['run', 'epoch', 'train_loss', 'val_loss', 'train_acc', '
 def print_training_details(variables, is_final_entry):
     formatted = []
     for col in logging_columns_list:
-        var = variables[col]
+        var = variables.get(col, None)
         if type(var) in (int, str):
             res = str(var)
         elif type(var) is float:
@@ -313,8 +316,8 @@ def main(run):
     wd = hyp['opt']['weight_decay']
     bias_scaler = hyp['opt']['bias_scaler']
 
-    train_augs = dict(flip=True, translate=hyp['aug']['translate'])
-    loss_fn = nn.CrossEntropyLoss(label_smoothing=0.2, reduction='none')
+    train_augs = dict(flip=hyp['aug']['flip'], translate=hyp['aug']['translate'])
+    loss_fn = nn.CrossEntropyLoss(label_smoothing=hyp['opt']['label_smoothing'], reduction='none')
 
     train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=batch_size, aug=train_augs)
     test_loader = PrepadCifarLoader('/tmp/cifar10', train=False, batch_size=2000)
@@ -322,7 +325,7 @@ def main(run):
     total_train_steps = math.ceil(len(train_loader) * epochs)
     lr_schedule = np.interp(np.arange(1+total_train_steps),
                             [0, int(0.23 * total_train_steps), total_train_steps],
-                            [0.2, 1, 0.07]) 
+                            [0.2, 1, 0.07]) # Linear warmup then annealing schedule
 
     model = make_net()
     model_ema = None
@@ -378,13 +381,13 @@ def main(run):
 
             current_steps += 1
 
-            if epoch >= hyp['ema']['start_epochs'] and current_steps % hyp['ema']['every_n_steps'] == 0:          
+            if epoch >= hyp['opt']['ema']['start_epochs'] and current_steps % hyp['opt']['ema']['every_n_steps'] == 0:          
                 if model_ema is None:
                     model_ema = NetworkEMA(model)
                 else:
                     # We warm up our ema's decay/momentum value over training (this lets us move fast, then average strongly at the end).
-                    base_rho = hyp['ema']['decay_base'] ** hyp['ema']['every_n_steps']
-                    rho = base_rho * (current_steps / total_train_steps) ** hyp['ema']['decay_pow']
+                    base_rho = hyp['opt']['ema']['decay_base'] ** hyp['opt']['ema']['every_n_steps']
+                    rho = base_rho * (current_steps / total_train_steps) ** hyp['opt']['ema']['decay_pow']
                     model_ema.update(model, decay=rho)
 
             if current_steps >= total_train_steps:
@@ -430,7 +433,7 @@ def main(run):
 
     with torch.no_grad():
 
-        ## Test-time augmentation strategy:
+        ## Test-time augmentation strategy (for tta_level=2):
         ## 1. Flip (/"mirror") the image left-to-right (50% of the time).
         ## 2. Translate (/"jitter") the image by one pixel in any direction (50% of the time, i.e. both happen 25% of the time).
         ##
@@ -440,24 +443,34 @@ def main(run):
         test_images = test_loader.normalize(test_loader.images)
         test_labels = test_loader.labels
 
-        pad = 1
-        padded_images = F.pad(test_images, (pad,)*4, 'reflect')
-        images_tta = torch.cat([
-            test_images,
-            padded_images[:, :, 0:32, 0:32],
-            padded_images[:, :, 0:32, 2:34],
-            padded_images[:, :, 2:34, 0:32],
-            padded_images[:, :, 2:34, 2:34],
-        ])
-        outputs_list = []
-        for inputs in images_tta.split(2000):
-            outputs = 0.5 * model_ema(inputs) + 0.5 * model_ema(inputs.flip(-1))
-            outputs_list.append(outputs)
-        outputs = torch.cat(outputs_list).view(-1, len(test_labels), 10)
-        
-        logits_mirror = outputs[0]
-        logits_mirror_jitter = outputs[1:].mean(0)
-        logits_tta = (0.5 * logits_mirror + 0.5 * logits_mirror_jitter)
+        if hyp['net']['tta_level'] == 0:
+            logits_tta = torch.cat([model_ema(inputs)
+                                    for inputs in test_images.split(2000)])
+
+        elif hyp['net']['tta_level'] == 1:
+            logits_tta = torch.cat([0.5 * model_ema(inputs) + 0.5 * model_ema(inputs.flip(-1))
+                                    for inputs in test_images.split(2000)])
+
+        elif hyp['net']['tta_level'] == 2:
+            pad = 1
+            padded_images = F.pad(test_images, (pad,)*4, 'reflect')
+            images_tta = torch.cat([
+                test_images,
+                padded_images[:, :, 0:32, 0:32],
+                padded_images[:, :, 0:32, 2:34],
+                padded_images[:, :, 2:34, 0:32],
+                padded_images[:, :, 2:34, 2:34],
+            ])
+            outputs_list = []
+            for inputs in images_tta.split(2000):
+                outputs = 0.5 * model_ema(inputs) + 0.5 * model_ema(inputs.flip(-1))
+                outputs_list.append(outputs)
+            outputs = torch.cat(outputs_list).view(-1, len(test_labels), 10)
+            
+            logits_mirror = outputs[0]
+            logits_mirror_jitter = outputs[1:].mean(0)
+            logits_tta = (0.5 * logits_mirror + 0.5 * logits_mirror_jitter)
+
         tta_ema_val_acc = (logits_tta.argmax(1) == test_labels).float().mean().item()
 
     ender.record()
