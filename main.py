@@ -177,7 +177,7 @@ class ConvGroup(nn.Module):
         self.init()
 
     def init(self):
-        # Create an implicit residual via dirac-initialized tensors
+        # Create an implicit residual via partial identity initialization
         w1 = self.conv1.weight.data
         w2 = self.conv2.weight.data
         torch.nn.init.dirac_(w1[:w1.size(1)])
@@ -204,7 +204,7 @@ class Flatten(nn.Module):
 depths = {
     'block1': (1 * hyp['net']['base_depth']), # 64  w/ depth at base value
     'block2': (4 * hyp['net']['base_depth']), # 256 w/ depth at base value
-    'block3': (6 * hyp['net']['base_depth']), # 448 w/ depth at base value
+    'block3': (6 * hyp['net']['base_depth']), # 384 w/ depth at base value
     'num_classes': 10
 }
 
