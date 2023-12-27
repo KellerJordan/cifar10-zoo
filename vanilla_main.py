@@ -18,11 +18,11 @@ torch.backends.cudnn.benchmark = True
 hyp = {
     'opt': {
         'batch_size': 1024,
-        'train_epochs': 10.5,
+        'train_epochs': 12.5,
         'lr': 1.0 / 1024,       # learning rate per example
         'momentum': 0.85,
-        'weight_decay': 2e-3,   # weight decay per step (will not be scaled up by lr)
-        'bias_scaler': 64.0,    # how much to scale up learning rate (but not weight decay) for BatchNorm biases
+        'weight_decay': 1.5e-2, # weight decay per step
+        'bias_scaler': 64.0,    # how much to scale up learning rate for BatchNorm biases
         'label_smoothing': 0.2,
     },
     'aug': {
@@ -296,24 +296,19 @@ def main(run):
     test_loader = PrepadCifarLoader('/tmp/cifar10', train=False, batch_size=2000)
 
     total_train_steps = math.ceil(len(train_loader) * epochs)
-    lr_schedule = np.interp(np.arange(1+total_train_steps),
-                            [0, int(0.2 * total_train_steps), total_train_steps],
-                            [0.2, 1, 0]) # Linear warmup then annealing schedule
+    lr_schedule = np.interp(np.arange(1+total_train_steps), [0, total_train_steps], [1, 0])
 
     model = make_net()
     current_steps = 0
 
     params = [(k, p) for k, p in model.named_parameters() if p.requires_grad]
-    norm_biases = [p for k, p in params if 'norm' in k]
-    conv_filters = [p for k, p in params if 'conv' in k]
     whiten_bias = [p for k, p in params if k == '0.bias']
+    conv_filters = [p for k, p in params if 'conv' in k]
+    norm_biases = [p for k, p in params if 'norm' in k]
     linear_weight = [p for k, p in params if k == '7.weight']
-
-    params_unscaled = dict(params=conv_filters+whiten_bias+linear_weight,
-                           lr=lr, weight_decay=(wd / lr))
-    params_scaled   = dict(params=norm_biases,
-                           lr=lr*bias_scaler, weight_decay=(wd / (lr*bias_scaler)))
-    optimizer = torch.optim.SGD([params_unscaled, params_scaled], momentum=momentum, nesterov=True)
+    param_configs = [dict(params=whiten_bias+conv_filters+linear_weight, lr=lr),
+                     dict(params=norm_biases, lr=lr*bias_scaler)]
+    optimizer = torch.optim.SGD(param_configs, momentum=momentum)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule.__getitem__)
 
     ## For accurately timing GPU code
@@ -345,9 +340,13 @@ def main(run):
             loss = loss_fn(outputs, labels).sum()
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
-            optimizer.step()
-            scheduler.step()
 
+            # Update step: SGD on all params + weight decay on conv filters
+            optimizer.step()
+            for p in conv_filters:
+                p.data *= (1 - lr_schedule[current_steps] * wd)
+
+            scheduler.step()
             current_steps += 1
             if current_steps >= total_train_steps:
                 break
