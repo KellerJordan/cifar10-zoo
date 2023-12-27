@@ -27,7 +27,7 @@
 # 5. GPU-accelerated dataloading.
 #
 # For comparison, version 0.7.0 of https://github.com/tysam-code/hlb-CIFAR10, which this script is
-# derived from, uses 513 TFLOPs and runs in 6.3 seconds. The final training script from David Page's
+# derived from, uses 513 TFLOPs and runs in 6.2 seconds. The final training script from David Page's
 # series "How to Train Your ResNet" uses 1,148 TFLOPs and runs in 15.1 seconds (on an A100). And a
 # standard 200-epoch ResNet18 training on CIFAR-10 uses 15,215 TFLOPs and runs in minutes (e.g., the
 # ResNet18 in https://github.com/kuangliu/pytorch-cifar attains 93% accuracy after several minutes).
