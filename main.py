@@ -1,3 +1,37 @@
+# fast_cifar10.py
+#
+# This script aims to optimize for the following objective: Predict the labels of the CIFAR-10
+# test-set with >= 94% accuracy in the shortest possible time after first seeing the training set.
+# This script reaches that goal in a runtime of 4.4 seconds on a single NVIDIA A100.
+#
+# To confirm that the mean accuracy is above 94%, we ran a test of n=1000 runs, which yielded an
+# average accuracy of 94.016% (p<0.0001 for the true mean being below 94%, via t-test).
+#
+# To obtain this result, we use a custom 8-layer convnet with 3M parameters and 0.28 GFLOPs per
+# forward-pass. The entire script uses 422 TFLOPs.
+#
+# An overview of the ideas we use is as follows:
+#
+# 1 Fast custom 8-layer convnet with identity initialization.
+#   * This is variant of that in https://github.com/tysam-code/hlb-CIFAR10.
+#   * The first convolution is initialized as a frozen patch-whitening layer, the final output is
+#     scaled down, and BatchNorm affine weights are disabled, all following David Page.
+#   * The whitening layer precedes an activation, and is concatenated with its negation to ensure
+#     completeness, following https://github.com/tysam-code/hlb-CIFAR10.
+#   * We add a learnable bias term to this first conv layer, which is frozen after 3 epochs.
+# 2. Test-time augmentation (horizontal flipping, and we add jittering by one pixel).
+# 3. Lookahead-like optimizer with decay rate slowing down near the end. This saves around 0.6 seconds,
+#    and is following https://github.com/tysam-code/hlb-CIFAR10. The base optimizer is Nesterov SGD
+#    with triangular lr schedule, and increased learning rate for BatchNorm biases, following David Page.
+# 4. Low momentum for BatchNorm running stats, following https://github.com/tysam-code/hlb-CIFAR10.
+# 5. GPU-accelerated dataloading.
+#
+# For comparison, version 0.7.0 of https://github.com/tysam-code/hlb-CIFAR10, which this script is
+# derived from, uses 513 TFLOPs and runs in 6.3 seconds. The final training script from David Page's
+# series "How to Train Your ResNet" uses 1,148 TFLOPs and runs in 15.1 seconds (on an A100). And a
+# standard 200-epoch ResNet18 training on CIFAR-10 uses 15,215 TFLOPs and runs in minutes (e.g., the
+# ResNet18 in https://github.com/kuangliu/pytorch-cifar attains 93% accuracy after several minutes).
+
 #############################################
 #            Setup/Hyperparameters          #
 #############################################
