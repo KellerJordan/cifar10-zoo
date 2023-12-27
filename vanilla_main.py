@@ -295,21 +295,7 @@ def main(run):
     train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=batch_size, aug=train_augs)
     test_loader = PrepadCifarLoader('/tmp/cifar10', train=False, batch_size=2000)
 
-    total_train_steps = math.ceil(len(train_loader) * epochs)
-    lr_schedule = np.interp(np.arange(1+total_train_steps), [0, total_train_steps], [1, 0])
-
     model = make_net()
-    current_steps = 0
-
-    params = [(k, p) for k, p in model.named_parameters() if p.requires_grad]
-    whiten_bias = [p for k, p in params if k == '0.bias']
-    conv_filters = [p for k, p in params if 'conv' in k]
-    norm_biases = [p for k, p in params if 'norm' in k]
-    linear_weight = [p for k, p in params if k == '7.weight']
-    param_configs = [dict(params=whiten_bias+conv_filters+linear_weight, lr=lr),
-                     dict(params=norm_biases, lr=lr*bias_scaler)]
-    optimizer = torch.optim.SGD(param_configs, momentum=momentum)
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule.__getitem__)
 
     ## For accurately timing GPU code
     starter = torch.cuda.Event(enable_timing=True)
@@ -325,6 +311,13 @@ def main(run):
     torch.cuda.synchronize()
     total_time_seconds += 1e-3 * starter.elapsed_time(ender)
 
+    ## Optimizer and lr schedule
+    params = [(k, p) for k, p in model.named_parameters() if p.requires_grad]
+    opt_state = {k: torch.zeros_like(p.data) for k, p in params}
+    total_train_steps = math.ceil(len(train_loader) * epochs)
+    lr_schedule = torch.tensor(np.interp(np.arange(1+total_train_steps), [0, total_train_steps], [1, 0]))
+    current_steps = 0
+
     for epoch in range(math.ceil(epochs)):
 
         ####################
@@ -338,15 +331,22 @@ def main(run):
 
             outputs = model(inputs)
             loss = loss_fn(outputs, labels).sum()
-            optimizer.zero_grad(set_to_none=True)
+            model.zero_grad()
             loss.backward()
 
             # Update step: SGD on all params + weight decay on conv filters
-            optimizer.step()
-            for p in conv_filters:
-                p.data *= (1 - lr_schedule[current_steps] * wd)
+            for k, p in params:
+                # update momentum
+                opt_state[k] = p.grad + momentum * opt_state[k]
+                # do sgd step
+                layer_lr = lr * lr_schedule[current_steps]
+                if 'norm' in k:
+                    layer_lr *= bias_scaler
+                p.data -= layer_lr * opt_state[k]
+                # weight decay for conv filters
+                if 'conv' in k:
+                    p.data *= (1 - lr_schedule[current_steps] * wd)
 
-            scheduler.step()
             current_steps += 1
             if current_steps >= total_train_steps:
                 break
