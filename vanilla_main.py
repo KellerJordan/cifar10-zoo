@@ -305,15 +305,10 @@ def main(run):
 
     params = [(k, p) for k, p in model.named_parameters() if p.requires_grad]
     norm_biases = [p for k, p in params if 'norm' in k]
-    conv_filters = [p for k, p in params if 'conv' in k]
-    whiten_bias = [p for k, p in params if k == '0.bias']
-    linear_weight = [p for k, p in params if k == '7.weight']
-
-    params_unscaled = dict(params=conv_filters+whiten_bias+linear_weight,
-                           lr=lr, weight_decay=(wd / lr))
-    params_scaled   = dict(params=norm_biases,
-                           lr=lr*bias_scaler, weight_decay=(wd / (lr*bias_scaler)))
-    optimizer = torch.optim.SGD([params_unscaled, params_scaled], momentum=momentum, nesterov=True)
+    other_params = [p for k, p in params if 'norm' not in k] # convolutional filters, first layer bias, and final linear layer
+    param_configs = [dict(params=norm_biases, lr=lr*bias_scaler, weight_decay=(wd / (lr*bias_scaler))),
+                     dict(params=other_params, lr=lr, weight_decay=(wd / lr))]
+    optimizer = torch.optim.SGD(param_configs, momentum=momentum, nesterov=True)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule.__getitem__)
 
     ## For accurately timing GPU code
