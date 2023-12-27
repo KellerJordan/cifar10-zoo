@@ -20,7 +20,7 @@
 #     completeness, following https://github.com/tysam-code/hlb-CIFAR10.
 #   * We add a learnable bias term to this first conv layer, which is frozen after 3 epochs.
 # 2. Test-time augmentation (horizontal flipping, and we add jittering by one pixel).
-# 3. Lookahead-like optimizer with decay rate slowing down near the end. This saves around 0.6 seconds,
+# 3. Lookahead-like optimizer with decay rate slowing down near the end. This saves around 0.35 seconds,
 #    and is following https://github.com/tysam-code/hlb-CIFAR10. The base optimizer is Nesterov SGD
 #    with triangular lr schedule, and increased learning rate for BatchNorm biases, following David Page.
 # 4. Low momentum for BatchNorm running stats, following https://github.com/tysam-code/hlb-CIFAR10.
