@@ -19,7 +19,7 @@ hyp = {
     'opt': {
         'batch_size': 1024,
         'train_epochs': 10.5,
-        'lr': 1.0 / 1024,       # learning rate per example
+        'lr': 1.0,              # learning rate per step
         'momentum': 0.85,
         'weight_decay': 2e-3,   # weight decay per step (will not be scaled up by lr)
         'bias_scaler': 64.0,    # how much to scale up learning rate (but not weight decay) for BatchNorm biases
@@ -36,7 +36,7 @@ hyp = {
         'batchnorm_momentum': 0.6,
         'base_depth': 64,
         'scaling_factor': 1/9,
-        'tta_level': 2,         # The level of test-time augmentation. 0=none, 1=flip, 2=flip+jitter. More TTA takes longer but gives higher accuracy.
+        'tta_level': 2,         # The level of test-time augmentation. 0=none, 1=mirror, 2=mirror+translate. More TTA takes longer but gives higher accuracy.
     },
 }
 
@@ -137,6 +137,17 @@ class PrepadCifarLoader:
 #            Network Components             #
 #############################################
 
+class Flatten(nn.Module):
+    def forward(self, x):
+        return x.view(x.size(0), -1)
+
+class Mul(nn.Module):
+    def __init__(self, scale):
+        super().__init__()
+        self.scale = scale
+    def forward(self, x):
+        return x * self.scale
+
 class BatchNorm(nn.BatchNorm2d):
     def __init__(self, num_features, eps=1e-12, momentum=hyp['net']['batchnorm_momentum'],
                  weight=False, bias=True):
@@ -152,13 +163,6 @@ class Conv(nn.Conv2d):
         if bias:
             self.bias.data.zero_()
 
-class Mul(nn.Module):
-    def __init__(self, temperature):
-        super().__init__()
-        self.temperature = temperature
-    def forward(self, x): 
-        return x * self.temperature
-
 class ConvGroup(nn.Module):
     def __init__(self, channels_in, channels_out):
         super().__init__()
@@ -171,7 +175,7 @@ class ConvGroup(nn.Module):
         self.init()
 
     def init(self):
-        # Create an implicit residual via partial identity initialization
+        # Create an implicit residual via identity initialization
         w1 = self.conv1.weight.data
         w2 = self.conv2.weight.data
         torch.nn.init.dirac_(w1[:w1.size(1)])
@@ -187,22 +191,16 @@ class ConvGroup(nn.Module):
         x = self.activ(x)
         return x
 
-class Flatten(nn.Module):
-    def forward(self, x): 
-        return x.view(x.size(0), -1) 
-
 #############################################
 #            Network Definition             #
 #############################################
 
-depths = {
-    'block1': (1 * hyp['net']['base_depth']), # 64  w/ depth at base value
-    'block2': (4 * hyp['net']['base_depth']), # 256 w/ depth at base value
-    'block3': (6 * hyp['net']['base_depth']), # 384 w/ depth at base value
-    'num_classes': 10
-}
-
 def make_net():
+    depths = {
+        'block1': (1 * hyp['net']['base_depth']), # 64  w/ depth at base value
+        'block2': (4 * hyp['net']['base_depth']), # 256 w/ depth at base value
+        'block3': (6 * hyp['net']['base_depth']), # 384 w/ depth at base value
+    }
     whiten_conv_depth = 2 * 3 * hyp['net']['whitening']['kernel_size']**2
     net = nn.Sequential(
         Conv(3, whiten_conv_depth, kernel_size=hyp['net']['whitening']['kernel_size'], padding=0, bias=True),
@@ -212,7 +210,7 @@ def make_net():
         ConvGroup(depths['block2'],  depths['block3']),
         nn.MaxPool2d(3),
         Flatten(),
-        nn.Linear(depths['block3'], depths['num_classes'], bias=False),
+        nn.Linear(depths['block3'], 10, bias=False),
         Mul(hyp['net']['scaling_factor']),
     )
     net = net.cuda()
@@ -224,7 +222,7 @@ def make_net():
     return net
 
 #############################################
-#          Init Helper Functions            #
+#       Whitening Conv Initialization       #
 #############################################
 
 def get_patches(x, patch_shape):
@@ -238,7 +236,6 @@ def get_whitening_parameters(patches):
     eigenvalues, eigenvectors = torch.linalg.eigh(est_patch_covariance, UPLO='U')
     return eigenvalues.flip(0).view(-1, 1, 1, 1), eigenvectors.T.reshape(c*h*w,c,h,w).flip(0)
 
-# Note that this is a large epsilon, so the bottom half of principal directions won't fully whiten
 def init_whitening_conv(layer, train_set, eps=5e-4):
     patches = get_patches(train_set, patch_shape=layer.weight.data.shape[2:])
     eigenvalues, eigenvectors = get_whitening_parameters(patches)
@@ -246,9 +243,9 @@ def init_whitening_conv(layer, train_set, eps=5e-4):
     layer.weight.data[:] = torch.cat((eigenvectors_scaled, -eigenvectors_scaled))
     layer.weight.requires_grad = False
 
-########################################
-#               Logging                #
-########################################
+############################################
+#                 Logging                  #
+############################################
 
 def print_columns(columns_list, is_head=False, is_final_entry=False):
     print_string = ''
@@ -276,15 +273,15 @@ def print_training_details(variables, is_final_entry):
         formatted.append(res.rjust(len(col)))
     print_columns(formatted, is_final_entry=is_final_entry)
 
-########################################
-#           Train and Eval             #
-########################################
+############################################
+#             Train and Eval               #
+############################################
 
 def main(run):
 
     batch_size = hyp['opt']['batch_size']
     epochs = hyp['opt']['train_epochs']
-    lr = hyp['opt']['lr']
+    lr = hyp['opt']['lr'] / batch_size
     momentum = hyp['opt']['momentum']
     wd = hyp['opt']['weight_decay']
     bias_scaler = hyp['opt']['bias_scaler']
@@ -298,7 +295,7 @@ def main(run):
     total_train_steps = math.ceil(len(train_loader) * epochs)
     lr_schedule = np.interp(np.arange(1+total_train_steps),
                             [0, int(0.2 * total_train_steps), total_train_steps],
-                            [0.2, 1, 0]) # Linear warmup then annealing schedule
+                            [0.2, 1, 0]) # triangular learning rate schedule
 
     model = make_net()
     current_steps = 0
@@ -344,6 +341,7 @@ def main(run):
             scheduler.step()
 
             current_steps += 1
+
             if current_steps >= total_train_steps:
                 break
 
@@ -382,8 +380,8 @@ def main(run):
     with torch.no_grad():
 
         ## Test-time augmentation strategy (for tta_level=2):
-        ## 1. Flip (/"mirror") the image left-to-right (50% of the time).
-        ## 2. Translate (/"jitter") the image by one pixel in any direction (50% of the time, i.e. both happen 25% of the time).
+        ## 1. Flip/mirror the image left-to-right (50% of the time).
+        ## 2. Translate the image by one pixel in any direction (50% of the time, i.e. both happen 25% of the time).
         ##
         ## This creates 8 inputs per image (left/right times the four directions),
         ## which we evaluate and then weight according to the given probabilities.
@@ -397,26 +395,26 @@ def main(run):
         def infer_mirror(inputs, net):
             return 0.5 * net(inputs) + 0.5 * net(inputs.flip(-1))
 
-        def infer_mirror_jitter(inputs, net):
+        def infer_mirror_translate(inputs, net):
             logits = infer_mirror(inputs, net)
             pad = 1
             padded_inputs = F.pad(inputs, (pad,)*4, 'reflect')
-            inputs_jitter_list = [
+            inputs_translate_list = [
                 padded_inputs[:, :, 0:32, 0:32],
                 padded_inputs[:, :, 0:32, 2:34],
                 padded_inputs[:, :, 2:34, 0:32],
                 padded_inputs[:, :, 2:34, 2:34],
             ]
-            logits_jitter_list = [infer_mirror(inputs_jitter, net) for inputs_jitter in inputs_jitter_list]
-            logits_jitter = torch.stack(logits_jitter_list).mean(0)
-            return 0.5 * logits + 0.5 * logits_jitter
+            logits_translate_list = [infer_mirror(inputs_translate, net) for inputs_translate in inputs_translate_list]
+            logits_translate = torch.stack(logits_translate_list).mean(0)
+            return 0.5 * logits + 0.5 * logits_translate
             
         if hyp['net']['tta_level'] == 0:
             infer_fn = infer_basic
         elif hyp['net']['tta_level'] == 1:
             infer_fn = infer_mirror
         elif hyp['net']['tta_level'] == 2:
-            infer_fn = infer_mirror_jitter
+            infer_fn = infer_mirror_translate
 
         logits_tta = torch.cat([infer_fn(inputs, model) for inputs in test_images.split(2000)])
         tta_val_acc = (logits_tta.argmax(1) == test_labels).float().mean().item()
