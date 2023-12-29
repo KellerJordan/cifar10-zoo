@@ -7,29 +7,34 @@
 # To confirm that the mean accuracy is above 94%, we ran a test of n=1000 runs, which yielded an
 # average accuracy of 94.016% (p<0.0001 for the true mean being below 94%, via t-test).
 #
-# To obtain this result, we use a custom 8-layer convnet with 3M parameters and 0.28 GFLOPs per
-# forward-pass. The entire script uses 422 TFLOPs.
+# To obtain this result, we use the following methods:
 #
-# An overview of the ideas we use is as follows:
+# 1. Our network architecture is a custom 8-layer convnet with whitening and identity initialization.
+#    * This is variant of that found in https://github.com/tysam-code/hlb-CIFAR10.
+#    * Following Page (2019), the first convolution is initialized as a frozen patch-whitening layer
+#      using statistics from the training images.
+#    * Following hlb-CIFAR10, the whitening layer precedes an activation, and is concatenated with its
+#      negation to ensure completeness. We also add a learnable bias, which is frozen after 3 epochs.
+#    * The remaining six convolutional layers are initialized as identity transforms wherever possible.
+#    * Following Page (2019), the logit output is downscaled and BatchNorm affine weights are disabled.
+# 2. For test-time augmentation, we use horizontal flipping and also add one-pixel translation.
+# 3. Following Page (2019), we use Nesterov SGD with a triangular learning rate schedule and increased
+#    learning rate for BatchNorm biases. On top of this, following hlb-CIFAR10, we use a lookahead-
+#    like scheme with slow decay rate at the end of training, which saves an extra 0.35 seconds.
+# 4. Following hlb-CIFAR10, we use a low momentum of 0.6 for running BatchNorm stats, which we find
+#    yields more accurate estimates for very short trainings than the standard setting of 0.9.
+# 5. We use GPU-accelerated dataloading, which is of course crucial. A generic fast CIFAR-10 dataloader
+#    can be found at https://github.com/KellerJordan/cifar10-loader.
 #
-# 1 Fast custom 8-layer convnet with identity initialization.
-#   * This is variant of that in https://github.com/tysam-code/hlb-CIFAR10.
-#   * The first convolution is initialized as a frozen patch-whitening layer, the final output is
-#     scaled down, and BatchNorm affine weights are disabled, all following David Page.
-#   * The whitening layer precedes an activation, and is concatenated with its negation to ensure
-#     completeness, following https://github.com/tysam-code/hlb-CIFAR10.
-#   * We add a learnable bias term to this first conv layer, which is frozen after 3 epochs.
-# 2. Test-time augmentation (horizontal flipping and translation by one pixel).
-# 3. Lookahead-like optimizer with decay rate slowing down near the end. This saves around 0.35 seconds,
-#    and is following https://github.com/tysam-code/hlb-CIFAR10. The base optimizer is Nesterov SGD
-#    with triangular lr schedule, and increased learning rate for BatchNorm biases, following David Page.
-# 4. Low momentum for BatchNorm running stats, following https://github.com/tysam-code/hlb-CIFAR10.
-# 5. GPU-accelerated dataloading.
+# The 8-layer convnet we train has 3M parameters and uses 0.16 GFLOPs per forward pass. The entire
+# training run uses 205 TFLOPs, which could theoretically take 0.66 A100-seconds at perfect utilization.
 #
-# For comparison, version 0.7.0 of https://github.com/tysam-code/hlb-CIFAR10, which this script is
-# derived from, uses 513 TFLOPs and runs in 6.2 seconds. The final training script from David Page's
-# series "How to Train Your ResNet" uses 1,148 TFLOPs and runs in 15.1 seconds (on an A100). And the
-# standard 200-epoch ResNet18 training on CIFAR-10 uses ~30,000 TFLOPs and runs in minutes.
+# For comparison, version 0.7.0 of https://github.com/tysam-code/hlb-CIFAR10, which this script
+# descends from, uses 283 TFLOPs and runs in 6.2 seconds. The final training script from David Page's
+# series "How to Train Your ResNet" (Page 2019) uses 1,148 TFLOPs and runs in 15.1 seconds (on an A100).
+# And the standard 200-epoch ResNet18 training on CIFAR-10 uses ~30,000 TFLOPs and runs in minutes.
+#
+# 
 
 #############################################
 #            Setup/Hyperparameters          #
@@ -176,6 +181,17 @@ class PrepadCifarLoader:
 #            Network Components             #
 #############################################
 
+class Mul(nn.Module):
+    def __init__(self, temperature):
+        super().__init__()
+        self.temperature = temperature
+    def forward(self, x):
+        return x * self.temperature
+
+class Flatten(nn.Module):
+    def forward(self, x):
+        return x.view(x.size(0), -1)
+
 class BatchNorm(nn.BatchNorm2d):
     def __init__(self, num_features, eps=1e-12, momentum=hyp['net']['batchnorm_momentum'],
                  weight=False, bias=True):
@@ -190,13 +206,6 @@ class Conv(nn.Conv2d):
         super().__init__(in_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=bias)
         if bias:
             self.bias.data.zero_()
-
-class Mul(nn.Module):
-    def __init__(self, temperature):
-        super().__init__()
-        self.temperature = temperature
-    def forward(self, x): 
-        return x * self.temperature
 
 class ConvGroup(nn.Module):
     def __init__(self, channels_in, channels_out):
@@ -225,10 +234,6 @@ class ConvGroup(nn.Module):
         x = self.norm2(x)
         x = self.activ(x)
         return x
-
-class Flatten(nn.Module):
-    def forward(self, x): 
-        return x.view(x.size(0), -1) 
 
 #############################################
 #            Network Definition             #
