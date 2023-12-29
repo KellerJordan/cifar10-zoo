@@ -19,7 +19,7 @@
 #   * The whitening layer precedes an activation, and is concatenated with its negation to ensure
 #     completeness, following https://github.com/tysam-code/hlb-CIFAR10.
 #   * We add a learnable bias term to this first conv layer, which is frozen after 3 epochs.
-# 2. Test-time augmentation (horizontal flipping, and we add jittering by one pixel).
+# 2. Test-time augmentation (horizontal flipping and translation by one pixel).
 # 3. Lookahead-like optimizer with decay rate slowing down near the end. This saves around 0.35 seconds,
 #    and is following https://github.com/tysam-code/hlb-CIFAR10. The base optimizer is Nesterov SGD
 #    with triangular lr schedule, and increased learning rate for BatchNorm biases, following David Page.
@@ -75,7 +75,7 @@ hyp = {
         'batchnorm_momentum': 0.6,
         'base_depth': 64,
         'scaling_factor': 1/9,
-        'tta_level': 2,         # The level of test-time augmentation. 0=none, 1=flip, 2=flip+jitter. More TTA takes longer but gives higher accuracy.
+        'tta_level': 2,         # The level of test-time augmentation. 0=none, 1=mirror, 2=mirror+translate. More TTA takes longer but gives higher accuracy.
     },
 }
 
@@ -460,8 +460,8 @@ def main(run):
     with torch.no_grad():
 
         ## Test-time augmentation strategy (for tta_level=2):
-        ## 1. Flip (/"mirror") the image left-to-right (50% of the time).
-        ## 2. Translate (/"jitter") the image by one pixel in any direction (50% of the time, i.e. both happen 25% of the time).
+        ## 1. Flip/mirror the image left-to-right (50% of the time).
+        ## 2. Translate the image by one pixel in any direction (50% of the time, i.e. both happen 25% of the time).
         ##
         ## This creates 8 inputs per image (left/right times the four directions),
         ## which we evaluate and then weight according to the given probabilities.
@@ -475,26 +475,26 @@ def main(run):
         def infer_mirror(inputs, net):
             return 0.5 * net(inputs) + 0.5 * net(inputs.flip(-1))
 
-        def infer_mirror_jitter(inputs, net):
+        def infer_mirror_translate(inputs, net):
             logits = infer_mirror(inputs, net)
             pad = 1
             padded_inputs = F.pad(inputs, (pad,)*4, 'reflect')
-            inputs_jitter_list = [
+            inputs_translate_list = [
                 padded_inputs[:, :, 0:32, 0:32],
                 padded_inputs[:, :, 0:32, 2:34],
                 padded_inputs[:, :, 2:34, 0:32],
                 padded_inputs[:, :, 2:34, 2:34],
             ]
-            logits_jitter_list = [infer_mirror(inputs_jitter, net) for inputs_jitter in inputs_jitter_list]
-            logits_jitter = torch.stack(logits_jitter_list).mean(0)
-            return 0.5 * logits + 0.5 * logits_jitter
+            logits_translate_list = [infer_mirror(inputs_translate, net) for inputs_translate in inputs_translate_list]
+            logits_translate = torch.stack(logits_translate_list).mean(0)
+            return 0.5 * logits + 0.5 * logits_translate
             
         if hyp['net']['tta_level'] == 0:
             infer_fn = infer_basic
         elif hyp['net']['tta_level'] == 1:
             infer_fn = infer_mirror
         elif hyp['net']['tta_level'] == 2:
-            infer_fn = infer_mirror_jitter
+            infer_fn = infer_mirror_translate
 
         logits_tta = torch.cat([infer_fn(inputs, model_ema) for inputs in test_images.split(2000)])
         tta_ema_val_acc = (logits_tta.argmax(1) == test_labels).float().mean().item()
