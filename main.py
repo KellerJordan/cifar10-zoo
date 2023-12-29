@@ -1,11 +1,8 @@
 # fast_cifar10.py
 #
-# This script aims to optimize for the following objective: Predict the labels of the CIFAR-10
-# test-set with >= 94% accuracy in the shortest possible time after first seeing the training set.
-# This script reaches that target in a runtime of 4.4 seconds on a single NVIDIA A100.
-#
-# To confirm that the mean accuracy is above 94%, we ran a test of n=1000 runs, which yielded an
-# average accuracy of 94.016% (hence p<0.0001 for the true mean being below 94%, via t-test).
+# This training script is designed with the goal of reaching 94% accuracy on the CIFAR-10 test-set in
+# the shortest possible time after first seeing the training set. It achieves that target in a
+# runtime of 4.4 seconds on a single NVIDIA A100.
 #
 # To obtain this result, we use the following methods:
 #
@@ -25,6 +22,9 @@
 #    yields more accurate estimates for very short trainings than the standard setting of 0.9.
 # 5. We use GPU-accelerated dataloading, which is of course crucial. A generic fast CIFAR-10 dataloader
 #    can be found at https://github.com/KellerJordan/cifar10-loader.
+#
+# To confirm that the mean accuracy is above 94%, we ran a test of n=1000 runs, which yielded an
+# average accuracy of 94.016% (hence p<0.0001 for the true mean being below 94%, via t-test).
 #
 # The 8-layer convnet we train has 3M parameters and uses 0.28 GFLOPs per forward pass. The entire
 # training run uses 413 TFLOPs, which could theoretically take 1.32 A100-seconds at perfect utilization.
@@ -182,16 +182,16 @@ class PrepadCifarLoader:
 #            Network Components             #
 #############################################
 
-class Mul(nn.Module):
-    def __init__(self, temperature):
-        super().__init__()
-        self.temperature = temperature
-    def forward(self, x):
-        return x * self.temperature
-
 class Flatten(nn.Module):
     def forward(self, x):
         return x.view(x.size(0), -1)
+
+class Mul(nn.Module):
+    def __init__(self, scale):
+        super().__init__()
+        self.scale = scale
+    def forward(self, x):
+        return x * self.scale
 
 class BatchNorm(nn.BatchNorm2d):
     def __init__(self, num_features, eps=1e-12, momentum=hyp['net']['batchnorm_momentum'],
@@ -220,7 +220,7 @@ class ConvGroup(nn.Module):
         self.init()
 
     def init(self):
-        # Create an implicit residual via partial identity initialization
+        # Create an implicit residual via identity initialization
         w1 = self.conv1.weight.data
         w2 = self.conv2.weight.data
         torch.nn.init.dirac_(w1[:w1.size(1)])
@@ -240,14 +240,12 @@ class ConvGroup(nn.Module):
 #            Network Definition             #
 #############################################
 
-depths = {
-    'block1': (1 * hyp['net']['base_depth']), # 64  w/ depth at base value
-    'block2': (4 * hyp['net']['base_depth']), # 256 w/ depth at base value
-    'block3': (6 * hyp['net']['base_depth']), # 384 w/ depth at base value
-    'num_classes': 10
-}
-
 def make_net():
+    depths = {
+        'block1': (1 * hyp['net']['base_depth']), # 64  w/ depth at base value
+        'block2': (4 * hyp['net']['base_depth']), # 256 w/ depth at base value
+        'block3': (6 * hyp['net']['base_depth']), # 384 w/ depth at base value
+    }
     whiten_conv_depth = 2 * 3 * hyp['net']['whitening']['kernel_size']**2
     net = nn.Sequential(
         Conv(3, whiten_conv_depth, kernel_size=hyp['net']['whitening']['kernel_size'], padding=0, bias=True),
@@ -257,7 +255,7 @@ def make_net():
         ConvGroup(depths['block2'],  depths['block3']),
         nn.MaxPool2d(3),
         Flatten(),
-        nn.Linear(depths['block3'], depths['num_classes'], bias=False),
+        nn.Linear(depths['block3'], 10, bias=False),
         Mul(hyp['net']['scaling_factor']),
     )
     net = net.cuda()
@@ -269,7 +267,7 @@ def make_net():
     return net
 
 #############################################
-#          Init Helper Functions            #
+#       Whitening Conv Initialization       #
 #############################################
 
 def get_patches(x, patch_shape):
@@ -283,7 +281,6 @@ def get_whitening_parameters(patches):
     eigenvalues, eigenvectors = torch.linalg.eigh(est_patch_covariance, UPLO='U')
     return eigenvalues.flip(0).view(-1, 1, 1, 1), eigenvectors.T.reshape(c*h*w,c,h,w).flip(0)
 
-# Note that this is a large epsilon, so the bottom half of principal directions won't fully whiten
 def init_whitening_conv(layer, train_set, eps=5e-4):
     patches = get_patches(train_set, patch_shape=layer.weight.data.shape[2:])
     eigenvalues, eigenvectors = get_whitening_parameters(patches)
@@ -291,9 +288,9 @@ def init_whitening_conv(layer, train_set, eps=5e-4):
     layer.weight.data[:] = torch.cat((eigenvectors_scaled, -eigenvectors_scaled))
     layer.weight.requires_grad = False
 
-########################################
-#                 EMA                  #
-########################################
+############################################
+#                   EMA                    #
+############################################
 
 class LookaheadEMA(nn.Module):
     def __init__(self, net):
@@ -310,9 +307,9 @@ class LookaheadEMA(nn.Module):
     def forward(self, inputs):
         return self.net_ema(inputs)
 
-########################################
-#               Logging                #
-########################################
+############################################
+#                 Logging                  #
+############################################
 
 def print_columns(columns_list, is_head=False, is_final_entry=False):
     print_string = ''
@@ -340,9 +337,9 @@ def print_training_details(variables, is_final_entry):
         formatted.append(res.rjust(len(col)))
     print_columns(formatted, is_final_entry=is_final_entry)
 
-########################################
-#           Train and Eval             #
-########################################
+############################################
+#             Train and Eval               #
+############################################
 
 def main(run):
 
