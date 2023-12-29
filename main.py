@@ -5,7 +5,7 @@
 # This script reaches that target in a runtime of 4.4 seconds on a single NVIDIA A100.
 #
 # To confirm that the mean accuracy is above 94%, we ran a test of n=1000 runs, which yielded an
-# average accuracy of 94.016% (p<0.0001 for the true mean being below 94%, via t-test).
+# average accuracy of 94.016% (hence p<0.0001 for the true mean being below 94%, via t-test).
 #
 # To obtain this result, we use the following methods:
 #
