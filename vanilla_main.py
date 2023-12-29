@@ -83,6 +83,10 @@ def batch_crop(inputs, crop_size):
     cropped_batch = torch.masked_select(inputs, crop_mask)
     return cropped_batch.view(inputs.shape[0], inputs.shape[1], crop_size, crop_size)
 
+def batch_cutout(inputs, size):
+    cutout_masks = make_random_square_masks(inputs, size)
+    return inputs.masked_fill(cutout_masks, 0)
+
 ## This is a pre-padded variant of quick_cifar.CifarLoader which moves the padding step of random translate
 ## from __iter__ to __init__, so that it doesn't need to be repeated each epoch.
 class PrepadCifarLoader:
@@ -102,10 +106,10 @@ class PrepadCifarLoader:
 
         self.normalize = T.Normalize(CIFAR_MEAN, CIFAR_STD)
         self.denormalize = T.Normalize(-CIFAR_MEAN / CIFAR_STD, 1 / CIFAR_STD)
-        
+    
         self.aug = aug or {}
         for k in self.aug.keys():
-            assert k in ['flip', 'translate'], 'Unrecognized key: %s' % k
+            assert k in ['flip', 'translate', 'cutout'], 'Unrecognized key: %s' % k 
 
         # Pre-pad images to save time when doing random translation
         pad = self.aug.get('translate', 0)
@@ -121,6 +125,8 @@ class PrepadCifarLoader:
             images = batch_crop(images, self.images.shape[-2])
         if self.aug.get('flip', False):
             images = batch_flip_lr(images)
+        if self.aug.get('cutout', 0) > 0:
+            images = batch_cutout(images, self.aug['cutout'])
         return images
 
     def __len__(self):
@@ -286,7 +292,7 @@ def main(run):
     wd = hyp['opt']['weight_decay']
     bias_scaler = hyp['opt']['bias_scaler']
 
-    train_augs = dict(flip=hyp['aug']['flip'], translate=hyp['aug']['translate'])
+    train_augs = dict(flip=hyp['aug']['flip'], translate=hyp['aug']['translate'], cutout=hyp['aug']['cutout'])
     loss_fn = nn.CrossEntropyLoss(label_smoothing=hyp['opt']['label_smoothing'], reduction='none')
 
     train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=batch_size, aug=train_augs)
