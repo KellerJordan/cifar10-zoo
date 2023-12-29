@@ -2,7 +2,7 @@
 #
 # This script aims to optimize for the following objective: Predict the labels of the CIFAR-10
 # test-set with >= 94% accuracy in the shortest possible time after first seeing the training set.
-# This script reaches that goal in a runtime of 4.4 seconds on a single NVIDIA A100.
+# This script reaches that target in a runtime of 4.4 seconds on a single NVIDIA A100.
 #
 # To confirm that the mean accuracy is above 94%, we ran a test of n=1000 runs, which yielded an
 # average accuracy of 94.016% (p<0.0001 for the true mean being below 94%, via t-test).
@@ -10,15 +10,15 @@
 # To obtain this result, we use the following methods:
 #
 # 1. Our network architecture is a custom 8-layer convnet with whitening and identity initialization.
-#    * This is variant of that found in https://github.com/tysam-code/hlb-CIFAR10.
-#    * Following Page (2019), the first convolution is initialized as a frozen patch-whitening layer
+#    * This is variant of the network used by https://github.com/tysam-code/hlb-CIFAR10.
+#    * Following Page (2018), the first convolution is initialized as a frozen patch-whitening layer
 #      using statistics from the training images.
 #    * Following hlb-CIFAR10, the whitening layer precedes an activation, and is concatenated with its
 #      negation to ensure completeness. We also add a learnable bias, which is frozen after 3 epochs.
-#    * The remaining six convolutional layers are initialized as identity transforms wherever possible.
-#    * Following Page (2019), the logit output is downscaled and BatchNorm affine weights are disabled.
-# 2. For test-time augmentation, we use horizontal flipping and also add one-pixel translation.
-# 3. Following Page (2019), we use Nesterov SGD with a triangular learning rate schedule and increased
+#    * The six remaining convolutional layers are initialized as identity transforms wherever possible.
+#    * Following Page (2018), the logit output is downscaled and BatchNorm affine weights are disabled.
+# 2. For test-time augmentation, we use horizontal flipping and also add a one-pixel translation.
+# 3. Following Page (2018), we use Nesterov SGD with a triangular learning rate schedule and increased
 #    learning rate for BatchNorm biases. On top of this, following hlb-CIFAR10, we use a lookahead-
 #    like scheme with slow decay rate at the end of training, which saves an extra 0.35 seconds.
 # 4. Following hlb-CIFAR10, we use a low momentum of 0.6 for running BatchNorm stats, which we find
@@ -26,15 +26,16 @@
 # 5. We use GPU-accelerated dataloading, which is of course crucial. A generic fast CIFAR-10 dataloader
 #    can be found at https://github.com/KellerJordan/cifar10-loader.
 #
-# The 8-layer convnet we train has 3M parameters and uses 0.16 GFLOPs per forward pass. The entire
-# training run uses 205 TFLOPs, which could theoretically take 0.66 A100-seconds at perfect utilization.
+# The 8-layer convnet we train has 3M parameters and uses 0.28 GFLOPs per forward pass. The entire
+# training run uses 413 TFLOPs, which could theoretically take 1.32 A100-seconds at perfect utilization.
 #
 # For comparison, version 0.7.0 of https://github.com/tysam-code/hlb-CIFAR10, which this script
-# descends from, uses 283 TFLOPs and runs in 6.2 seconds. The final training script from David Page's
-# series "How to Train Your ResNet" (Page 2019) uses 1,148 TFLOPs and runs in 15.1 seconds (on an A100).
+# descends from, uses 587 TFLOPs and runs in 6.2 seconds. The final training script from David Page's
+# series "How to Train Your ResNet" (Page 2018) uses 1,148 TFLOPs and runs in 15.1 seconds (on an A100).
 # And the standard 200-epoch ResNet18 training on CIFAR-10 uses ~30,000 TFLOPs and runs in minutes.
 #
-# 
+# 1. Page, David. "How to train your resnet." Myrtle, https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/. Sept 24 (2018).
+
 
 #############################################
 #            Setup/Hyperparameters          #
