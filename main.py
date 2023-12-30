@@ -56,7 +56,7 @@ torch.backends.cudnn.benchmark = True
 hyp = {
     'opt': {
         'batch_size': 1024,
-        'train_epochs': 9.6,
+        'train_epochs': 9.1,
         'lr': 1.5,              # learning rate per step
         'momentum': 0.85,
         'weight_decay': 2e-3,   # weight decay per step (will not be scaled up by lr)
@@ -145,12 +145,15 @@ class PrepadCifarLoader:
 
         self.normalize = T.Normalize(CIFAR_MEAN, CIFAR_STD)
         self.denormalize = T.Normalize(-CIFAR_MEAN / CIFAR_STD, 1 / CIFAR_STD)
-        self.images = self.normalize(self.images)
         
         self.aug = aug or {}
         for k in self.aug.keys():
             assert k in ['flip', 'translate'], 'Unrecognized key: %s' % k
 
+        # Pre-flip images in order to do every-other epoch flipping scheme
+        self.images = self.normalize(self.images)
+        if self.aug.get('flip', False):
+            self.images = batch_flip_lr(self.images)
         # Pre-pad images to save time when doing random translation
         pad = self.aug.get('translate', 0)
         self.padded_images = F.pad(self.images, (pad,)*4, 'reflect') if pad > 0 else None
@@ -160,11 +163,12 @@ class PrepadCifarLoader:
         self.shuffle = train if shuffle is None else shuffle
 
     def augment_prepad(self, images):
-        #images = self.normalize(images)
         if self.aug.get('translate', 0) > 0:
             images = batch_crop(images, self.images.shape[-2])
         if self.aug.get('flip', False):
-            images = batch_flip_lr(images)
+            # Flip all images together every other epoch. This increases diversity relative to random flipping
+            if self.epoch % 2 == 1:
+                images = images.flip(-1)
         return images
 
     def __len__(self):
@@ -388,6 +392,8 @@ def main(run):
     total_time_seconds += 1e-3 * starter.elapsed_time(ender)
 
     for epoch in range(math.ceil(epochs)):
+        
+        train_loader.epoch = epoch
 
         if epoch == 3:
             model[0].bias.requires_grad = False
@@ -485,8 +491,8 @@ def main(run):
             padded_inputs = F.pad(inputs, (pad,)*4, 'reflect')
             inputs_translate_list = [
                 padded_inputs[:, :, 0:32, 0:32],
-                padded_inputs[:, :, 0:32, 2:34],
-                padded_inputs[:, :, 2:34, 0:32],
+                #padded_inputs[:, :, 0:32, 2:34],
+                #padded_inputs[:, :, 2:34, 0:32],
                 padded_inputs[:, :, 2:34, 2:34],
             ]
             logits_translate_list = [infer_mirror(inputs_translate, net) for inputs_translate in inputs_translate_list]
@@ -517,7 +523,7 @@ if __name__ == "__main__":
         code = f.read()
 
     print_columns(logging_columns_list, is_head=True)
-    accs = torch.tensor([main(run) for run in range(25)])
+    accs = torch.tensor([main(run) for run in range(400)])
     print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
     log = {'code': code, 'accs': accs}
