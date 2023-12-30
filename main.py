@@ -100,7 +100,6 @@ CIFAR_MEAN = torch.tensor((0.4914, 0.4822, 0.4465))
 CIFAR_STD = torch.tensor((0.2470, 0.2435, 0.2616))
 
 def make_random_square_masks(inputs, size):
-    is_even = int(size % 2 == 0)
     n,c,h,w = inputs.shape
 
     # seed top-left corners of squares to cutout boxes from, in one dimension each
