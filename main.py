@@ -56,7 +56,7 @@ torch.backends.cudnn.benchmark = True
 hyp = {
     'opt': {
         'batch_size': 1024,
-        'train_epochs': 9.1,
+        'train_epochs': 9.2,
         'lr': 1.5,              # learning rate per step
         'momentum': 0.85,
         'weight_decay': 2e-3,   # weight decay per step (will not be scaled up by lr)
@@ -154,6 +154,7 @@ class PrepadCifarLoader:
         self.images = self.normalize(self.images)
         if self.aug.get('flip', False):
             self.images = batch_flip_lr(self.images)
+        self.augment_calls = 0
         # Pre-pad images to save time when doing random translation
         pad = self.aug.get('translate', 0)
         self.padded_images = F.pad(self.images, (pad,)*4, 'reflect') if pad > 0 else None
@@ -167,8 +168,9 @@ class PrepadCifarLoader:
             images = batch_crop(images, self.images.shape[-2])
         if self.aug.get('flip', False):
             # Flip all images together every other epoch. This increases diversity relative to random flipping
-            if self.epoch % 2 == 1:
+            if self.augment_calls % 2 == 1:
                 images = images.flip(-1)
+        self.augment_calls += 1
         return images
 
     def __len__(self):
@@ -388,10 +390,7 @@ def main(run):
 
     for epoch in range(math.ceil(epochs)):
         
-        train_loader.epoch = epoch
-
-        if epoch == 3:
-            model[0].bias.requires_grad = False
+        model[0].bias.requires_grad = (epoch <= 1)
 
         ####################
         #     Training     #
