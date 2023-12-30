@@ -292,23 +292,20 @@ def init_whitening_conv(layer, train_set, eps=5e-4):
     layer.weight.requires_grad = False
 
 ############################################
-#                   EMA                    #
+#                Lookahead                 #
 ############################################
 
-class LookaheadEMA(nn.Module):
+class LookaheadState:
     def __init__(self, net):
-        super().__init__()
-        self.net_ema = copy.deepcopy(net).eval()
+        #self.net_ema = copy.deepcopy(net).eval()
+        self.net_ema = {k: v.clone() for k, v in net.state_dict().items()}
 
     def update(self, net, decay):
-        for ema_param, net_param in zip(self.net_ema.state_dict().values(), net.state_dict().values()):
+        for ema_param, net_param in zip(self.net_ema.values(), net.state_dict().values()):
             if net_param.dtype in (torch.half, torch.float):
                 ema_param.lerp_(net_param, 1-decay)
                 # copy the ema parameters back to the network, similarly to the Lookahead optimizer
                 net_param.copy_(ema_param)
-
-    def forward(self, inputs):
-        return self.net_ema(inputs)
 
 ############################################
 #                 Logging                  #
@@ -325,7 +322,7 @@ def print_columns(columns_list, is_head=False, is_final_entry=False):
     if is_head or is_final_entry:
         print('-'*len(print_string))
 
-logging_columns_list = ['run', 'epoch', 'train_loss', 'val_loss', 'train_acc', 'val_acc', 'ema_val_acc', 'tta_ema_val_acc', 'total_time_seconds']
+logging_columns_list = ['run', 'epoch', 'train_loss', 'val_loss', 'train_acc', 'val_acc', 'tta_val_acc', 'total_time_seconds']
 def print_training_details(variables, is_final_entry):
     formatted = []
     for col in logging_columns_list:
@@ -365,7 +362,7 @@ def main(run):
                             [0.2, 1, 0.07]) # triangular learning rate schedule
 
     model = make_net()
-    model_ema = None
+    lookahead_state = None
     current_steps = 0
 
     params = [(k, p) for k, p in model.named_parameters() if p.requires_grad]
@@ -417,16 +414,21 @@ def main(run):
             current_steps += 1
 
             if epoch >= hyp['opt']['ema']['start_epochs'] and current_steps % hyp['opt']['ema']['every_n_steps'] == 0:          
-                if model_ema is None:
-                    model_ema = LookaheadEMA(model)
+                if lookahead_state is None:
+                    lookahead_state = LookaheadState(model)
                 else:
                     # We warm up our ema's decay/momentum value over training (this lets us move fast, then average strongly at the end).
                     base_rho = hyp['opt']['ema']['decay_base'] ** hyp['opt']['ema']['every_n_steps']
                     rho = base_rho * (current_steps / total_train_steps) ** hyp['opt']['ema']['decay_pow']
-                    model_ema.update(model, decay=rho)
+                    lookahead_state.update(model, decay=rho)
+                    #model_ema.update(model, decay=rho)
 
             if current_steps >= total_train_steps:
                 break
+
+        if lookahead_state is not None:
+            # Copy back parameters final time
+            lookahead_state.update(model, decay=1.0)
 
         ender.record()
         torch.cuda.synchronize()
@@ -442,20 +444,14 @@ def main(run):
 
         model.eval()
         with torch.no_grad():
-            loss_list, acc_list, acc_list_ema = [], [], []
+            loss_list, acc_list = [], []
             for inputs, labels in test_loader:
                 outputs = model(inputs)
                 loss_list.append(loss_fn(outputs, labels).float().mean())
                 acc_list.append((outputs.argmax(1) == labels).float().mean())
-                if model_ema:
-                    outputs = model_ema(inputs)
-                    acc_list_ema.append((outputs.argmax(1) == labels).float().mean())
             val_acc = torch.stack(acc_list).mean().item()
             val_loss = torch.stack(loss_list).mean().item()
-            ema_val_acc = None
-            if model_ema:
-                ema_val_acc = torch.stack(acc_list_ema).mean().item()
-        tta_ema_val_acc = None
+        tta_val_acc = None
 
         print_training_details(locals(), is_final_entry=False)
         run = None # Only print the run number once
@@ -506,8 +502,8 @@ def main(run):
         elif hyp['net']['tta_level'] == 2:
             infer_fn = infer_mirror_translate
 
-        logits_tta = torch.cat([infer_fn(inputs, model_ema) for inputs in test_images.split(2000)])
-        tta_ema_val_acc = (logits_tta.argmax(1) == test_labels).float().mean().item()
+        logits_tta = torch.cat([infer_fn(inputs, model) for inputs in test_images.split(2000)])
+        tta_val_acc = (logits_tta.argmax(1) == test_labels).float().mean().item()
 
     ender.record()
     torch.cuda.synchronize()
@@ -516,7 +512,7 @@ def main(run):
     epoch = 'eval'
     print_training_details(locals(), is_final_entry=True)
 
-    return tta_ema_val_acc
+    return tta_val_acc
 
 if __name__ == "__main__":
     with open(sys.argv[0]) as f:
