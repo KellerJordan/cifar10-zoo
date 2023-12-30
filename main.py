@@ -297,7 +297,6 @@ def init_whitening_conv(layer, train_set, eps=5e-4):
 
 class LookaheadState:
     def __init__(self, net):
-        #self.net_ema = copy.deepcopy(net).eval()
         self.net_ema = {k: v.clone() for k, v in net.state_dict().items()}
 
     def update(self, net, decay):
@@ -381,7 +380,6 @@ def main(run):
 
     ## Initialize the whitening layer using training images
     starter.record()
-    #train_images = train_loader.normalize(train_loader.images[:5000])
     train_images = train_loader.images[:5000]
     init_whitening_conv(model[0], train_images)
     ender.record()
@@ -421,13 +419,12 @@ def main(run):
                     base_rho = hyp['opt']['ema']['decay_base'] ** hyp['opt']['ema']['every_n_steps']
                     rho = base_rho * (current_steps / total_train_steps) ** hyp['opt']['ema']['decay_pow']
                     lookahead_state.update(model, decay=rho)
-                    #model_ema.update(model, decay=rho)
 
             if current_steps >= total_train_steps:
                 break
 
         if lookahead_state is not None:
-            # Copy back parameters final time
+            # Copy back parameters a final time after each epoch
             lookahead_state.update(model, decay=1.0)
 
         ender.record()
@@ -471,7 +468,6 @@ def main(run):
         ## This creates 8 inputs per image (left/right times the four directions),
         ## which we evaluate and then weight according to the given probabilities.
 
-        #test_images = test_loader.normalize(test_loader.images)
         test_images = test_loader.images
         test_labels = test_loader.labels
 
@@ -487,8 +483,6 @@ def main(run):
             padded_inputs = F.pad(inputs, (pad,)*4, 'reflect')
             inputs_translate_list = [
                 padded_inputs[:, :, 0:32, 0:32],
-                #padded_inputs[:, :, 0:32, 2:34],
-                #padded_inputs[:, :, 2:34, 0:32],
                 padded_inputs[:, :, 2:34, 2:34],
             ]
             logits_translate_list = [infer_mirror(inputs_translate, net) for inputs_translate in inputs_translate_list]
