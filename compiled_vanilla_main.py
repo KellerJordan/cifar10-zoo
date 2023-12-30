@@ -18,7 +18,7 @@ torch.backends.cudnn.benchmark = True
 hyp = {
     'opt': {
         'batch_size': 1024,
-        'train_epochs': 10.5,
+        'train_epochs': 10.0,
         'lr': 1.0,              # learning rate per step
         'momentum': 0.85,
         'weight_decay': 2e-3,   # weight decay per step (will not be scaled up by lr)
@@ -308,6 +308,9 @@ def main(run, model):
     loss_fn = nn.CrossEntropyLoss(label_smoothing=hyp['opt']['label_smoothing'], reduction='none')
 
     train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=batch_size, aug=train_augs)
+    if run == 'warmup':
+        # The only purpose of the first run is to warmup the compiled model, so we can use dummy data
+        train_loader.labels = torch.randint(0, 10, size=(len(train_loader.labels),), device=train_loader.labels.device)
     test_loader = PrepadCifarLoader('/tmp/cifar10', train=False, batch_size=2000)
 
     total_train_steps = math.ceil(len(train_loader) * epochs)
@@ -447,7 +450,7 @@ if __name__ == "__main__":
     with open(sys.argv[0]) as f:
         code = f.read()
 
-    model = init_net()
+    model = make_net()
     model = torch.compile(model, mode='max-autotune')
     main('warmup', model)
 
