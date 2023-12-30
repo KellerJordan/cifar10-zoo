@@ -284,7 +284,7 @@ def print_training_details(variables, is_final_entry):
 #             Train and Eval               #
 ############################################
 
-def main(run):
+def main(run, model):
 
     batch_size = hyp['opt']['batch_size']
     epochs = hyp['opt']['train_epochs']
@@ -304,7 +304,16 @@ def main(run):
                             [0, int(0.2 * total_train_steps), total_train_steps],
                             [0.2, 1, 0]) # triangular learning rate schedule
 
-    model = make_net()
+    ## Reinitialize network
+    for m in model.modules():
+        if type(m) in (Conv, BatchNorm, nn.Linear):
+            m.reset_parameters()
+            if type(m) == Conv and m.bias is not None:
+                m.bias.data.zero_()
+    for m in model.modules():
+        if type(m) in (ConvGroup,):
+            m.init()
+
     current_steps = 0
 
     params = [(k, p) for k, p in model.named_parameters() if p.requires_grad]
@@ -324,7 +333,10 @@ def main(run):
     ## Initialize the whitening layer using training images
     starter.record()
     train_images = train_loader.normalize(train_loader.images[:5000])
-    init_whitening_conv(model[0], train_images)
+    try:
+        init_whitening_conv(model[0], train_images)
+    except:
+        init_whitening_conv(model._orig_mod[0], train_images)
     ender.record()
     torch.cuda.synchronize()
     total_time_seconds += 1e-3 * starter.elapsed_time(ender)
@@ -438,8 +450,11 @@ if __name__ == "__main__":
     with open(sys.argv[0]) as f:
         code = f.read()
 
+    model = make_net()
+    model = torch.compile(model, mode='max-autotune')
+
     print_columns(logging_columns_list, is_head=True)
-    accs = torch.tensor([main(run) for run in range(25)])
+    accs = torch.tensor([main(run, model) for run in range(25)])
     print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
     log = {'code': code, 'accs': accs}
