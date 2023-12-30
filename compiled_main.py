@@ -525,7 +525,7 @@ if __name__ == "__main__":
     with open(sys.argv[0]) as f:
         code = f.read()
 
-    # We make a single compiled model, which is re-initialized from scratch every run.
+    # Make a single compiled model, which is re-initialized from scratch every run.
     model = make_net()
     model = torch.compile(model, mode='max-autotune')
 
