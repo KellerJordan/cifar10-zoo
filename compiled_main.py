@@ -525,6 +525,7 @@ if __name__ == "__main__":
     # Make a single compiled model, which is re-initialized from scratch every run.
     model = make_net()
     model = torch.compile(model, mode='max-autotune')
+    main('warmup', model)
 
     print_columns(logging_columns_list, is_head=True)
     accs = torch.tensor([main(run, model) for run in range(25)])

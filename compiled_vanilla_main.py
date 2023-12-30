@@ -28,7 +28,6 @@ hyp = {
     'aug': {
         'flip': True,
         'translate': 2,
-        'cutout': 0,
     },
     'net': {
         'whitening': {
@@ -56,37 +55,32 @@ import torchvision.transforms as T
 CIFAR_MEAN = torch.tensor((0.4914, 0.4822, 0.4465))
 CIFAR_STD = torch.tensor((0.2470, 0.2435, 0.2616))
 
-def make_random_square_masks(inputs, size):
-    is_even = int(size % 2 == 0)
-    n,c,h,w = inputs.shape
-
-    # seed top-left corners of squares to cutout boxes from, in one dimension each
-    corner_y = torch.randint(0, h-size+1, size=(n,), device=inputs.device)
-    corner_x = torch.randint(0, w-size+1, size=(n,), device=inputs.device)
-
-    # measure distance, using the center as a reference point
-    corner_y_dists = torch.arange(h, device=inputs.device).view(1, 1, h, 1) - corner_y.view(-1, 1, 1, 1)
-    corner_x_dists = torch.arange(w, device=inputs.device).view(1, 1, 1, w) - corner_x.view(-1, 1, 1, 1)
-    
-    mask_y = (corner_y_dists >= 0) * (corner_y_dists < size)
-    mask_x = (corner_x_dists >= 0) * (corner_x_dists < size)
-
-    final_mask = mask_y * mask_x
-
-    return final_mask
-
 def batch_flip_lr(inputs):
     flip_mask = (torch.rand(len(inputs), device=inputs.device) < 0.5).view(-1, 1, 1, 1)
     return torch.where(flip_mask, inputs.flip(-1), inputs)
 
-def batch_crop(inputs, crop_size):
-    crop_mask = make_random_square_masks(inputs, crop_size)
-    cropped_batch = torch.masked_select(inputs, crop_mask)
-    return cropped_batch.view(inputs.shape[0], inputs.shape[1], crop_size, crop_size)
+def batch_crop(images, crop_size):
+    r = (images.size(-1) - crop_size)//2
+    shifts = torch.randint(-r, r+1, size=(len(images), 2), device=images.device)
+    images_out = torch.empty((len(images), 3, crop_size, crop_size), device=images.device, dtype=images.dtype)
 
-def batch_cutout(inputs, size):
-    cutout_masks = make_random_square_masks(inputs, size)
-    return inputs.masked_fill(cutout_masks, 0)
+    if r <= 2:
+        for sy in range(-r, r+1):
+            for sx in range(-r, r+1):
+                mask = (shifts[:, 0] == sy) & (shifts[:, 1] == sx)
+                images_out[mask] = images[mask, :, r+sy:r+sy+crop_size, r+sx:r+sx+crop_size]
+    else:
+        images_tmp = torch.empty((len(images), 3, crop_size, crop_size+2*r), device=images.device, dtype=images.dtype)
+        for s in range(-r, r+1):
+            mask = (shifts[:, 0] == s)
+            images_tmp[mask] = images[mask, :, r+s:r+s+crop_size, :]
+
+        images_out = torch.empty((len(images), 3, crop_size, crop_size), device=images.device, dtype=images.dtype)
+        for s in range(-r, r+1):
+            mask = (shifts[:, 1] == s)
+            images_out[mask] = images_tmp[mask, :, :, r+s:r+s+crop_size]
+
+    return images_out
 
 ## This is a pre-padded variant of quick_cifar.CifarLoader which moves the padding step of random translate
 ## from __iter__ to __init__, so that it doesn't need to be repeated each epoch.
@@ -107,11 +101,16 @@ class PrepadCifarLoader:
 
         self.normalize = T.Normalize(CIFAR_MEAN, CIFAR_STD)
         self.denormalize = T.Normalize(-CIFAR_MEAN / CIFAR_STD, 1 / CIFAR_STD)
-    
+
         self.aug = aug or {}
         for k in self.aug.keys():
-            assert k in ['flip', 'translate', 'cutout'], 'Unrecognized key: %s' % k 
+            assert k in ['flip', 'translate'], 'Unrecognized key: %s' % k
 
+        # Pre-flip images in order to do every-other epoch flipping scheme
+        self.images = self.normalize(self.images)
+        if self.aug.get('flip', False):
+            self.images = batch_flip_lr(self.images)
+        self.augment_calls = 0
         # Pre-pad images to save time when doing random translation
         pad = self.aug.get('translate', 0)
         self.padded_images = F.pad(self.images, (pad,)*4, 'reflect') if pad > 0 else None
@@ -121,13 +120,13 @@ class PrepadCifarLoader:
         self.shuffle = train if shuffle is None else shuffle
 
     def augment_prepad(self, images):
-        images = self.normalize(images)
         if self.aug.get('translate', 0) > 0:
             images = batch_crop(images, self.images.shape[-2])
         if self.aug.get('flip', False):
-            images = batch_flip_lr(images)
-        if self.aug.get('cutout', 0) > 0:
-            images = batch_cutout(images, self.aug['cutout'])
+            # Flip all images together every other epoch. This increases diversity relative to random flipping
+            if self.augment_calls % 2 == 1:
+                images = images.flip(-1)
+        self.augment_calls += 1
         return images
 
     def __len__(self):
@@ -138,7 +137,7 @@ class PrepadCifarLoader:
         indices = (torch.randperm if self.shuffle else torch.arange)(len(images), device=images.device)
         for i in range(len(self)):
             idxs = indices[i*self.batch_size:(i+1)*self.batch_size]
-            yield (images[idxs], self.labels[idxs])
+            yield images[idxs], self.labels[idxs]
 
 #############################################
 #            Network Components             #
@@ -228,6 +227,18 @@ def make_net():
             mod.float()
     return net
 
+def reinit_net(model):
+    for m in model.modules():
+        if type(m) in (Conv, BatchNorm, nn.Linear):
+            m.reset_parameters()
+            if type(m) == Conv and m.bias is not None:
+                m.bias.data.zero_()
+        if type(m) is BatchNorm:
+            m.reset_running_stats()
+    for m in model.modules():
+        if type(m) in (ConvGroup,):
+            m.init()
+
 #############################################
 #       Whitening Conv Initialization       #
 #############################################
@@ -293,7 +304,7 @@ def main(run, model):
     wd = hyp['opt']['weight_decay']
     bias_scaler = hyp['opt']['bias_scaler']
 
-    train_augs = dict(flip=hyp['aug']['flip'], translate=hyp['aug']['translate'], cutout=hyp['aug']['cutout'])
+    train_augs = dict(flip=hyp['aug']['flip'], translate=hyp['aug']['translate'])
     loss_fn = nn.CrossEntropyLoss(label_smoothing=hyp['opt']['label_smoothing'], reduction='none')
 
     train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=batch_size, aug=train_augs)
@@ -304,16 +315,7 @@ def main(run, model):
                             [0, int(0.2 * total_train_steps), total_train_steps],
                             [0.2, 1, 0]) # triangular learning rate schedule
 
-    ## Reinitialize network
-    for m in model.modules():
-        if type(m) in (Conv, BatchNorm, nn.Linear):
-            m.reset_parameters()
-            if type(m) == Conv and m.bias is not None:
-                m.bias.data.zero_()
-    for m in model.modules():
-        if type(m) in (ConvGroup,):
-            m.init()
-
+    reinit_net(model)
     current_steps = 0
 
     params = [(k, p) for k, p in model.named_parameters() if p.requires_grad]
@@ -332,11 +334,8 @@ def main(run, model):
 
     ## Initialize the whitening layer using training images
     starter.record()
-    train_images = train_loader.normalize(train_loader.images[:5000])
-    try:
-        init_whitening_conv(model[0], train_images)
-    except:
-        init_whitening_conv(model._orig_mod[0], train_images)
+    train_images = train_loader.images[:5000]
+    init_whitening_conv(model._orig_mod[0], train_images)
     ender.record()
     torch.cuda.synchronize()
     total_time_seconds += 1e-3 * starter.elapsed_time(ender)
@@ -404,7 +403,7 @@ def main(run, model):
         ## This creates 8 inputs per image (left/right times the four directions),
         ## which we evaluate and then weight according to the given probabilities.
 
-        test_images = test_loader.normalize(test_loader.images)
+        test_images = test_loader.images
         test_labels = test_loader.labels
 
         def infer_basic(inputs, net):
@@ -419,8 +418,6 @@ def main(run, model):
             padded_inputs = F.pad(inputs, (pad,)*4, 'reflect')
             inputs_translate_list = [
                 padded_inputs[:, :, 0:32, 0:32],
-                padded_inputs[:, :, 0:32, 2:34],
-                padded_inputs[:, :, 2:34, 0:32],
                 padded_inputs[:, :, 2:34, 2:34],
             ]
             logits_translate_list = [infer_mirror(inputs_translate, net) for inputs_translate in inputs_translate_list]
@@ -450,8 +447,9 @@ if __name__ == "__main__":
     with open(sys.argv[0]) as f:
         code = f.read()
 
-    model = make_net()
+    model = init_net()
     model = torch.compile(model, mode='max-autotune')
+    main('warmup', model)
 
     print_columns(logging_columns_list, is_head=True)
     accs = torch.tensor([main(run, model) for run in range(25)])
