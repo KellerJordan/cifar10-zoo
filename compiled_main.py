@@ -270,7 +270,6 @@ def make_net():
     return net
 
 def reinit_net(model):
-    model._orig_mod[0].bias.requires_grad = True
     for m in model.modules():
         if type(m) in (Conv, BatchNorm, nn.Linear):
             m.reset_parameters()
@@ -309,6 +308,7 @@ def init_whitening_conv(layer, train_set, eps=5e-4):
 ############################################
 
 class LookaheadState:
+
     def __init__(self, net):
         self.net_ema = {k: v.clone() for k, v in net.state_dict().items()}
 
@@ -404,8 +404,7 @@ def main(run, model):
         
         train_loader.epoch = epoch
 
-        if epoch == 3:
-            model._orig_mod[0].bias.requires_grad = False
+        model._orig_mod[0].bias.requires_grad = (epoch <= 2)
 
         ####################
         #     Training     #
