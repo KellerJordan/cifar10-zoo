@@ -145,7 +145,7 @@ class PrepadCifarLoader:
 
         self.normalize = T.Normalize(CIFAR_MEAN, CIFAR_STD)
         self.denormalize = T.Normalize(-CIFAR_MEAN / CIFAR_STD, 1 / CIFAR_STD)
-        
+
         self.aug = aug or {}
         for k in self.aug.keys():
             assert k in ['flip', 'translate'], 'Unrecognized key: %s' % k
@@ -181,7 +181,7 @@ class PrepadCifarLoader:
         indices = (torch.randperm if self.shuffle else torch.arange)(len(images), device=images.device)
         for i in range(len(self)):
             idxs = indices[i*self.batch_size:(i+1)*self.batch_size]
-            yield images[idxs], self.labels[idxs]
+            yield (images[idxs], self.labels[idxs])
 
 #############################################
 #            Network Components             #
@@ -389,7 +389,7 @@ def main(run):
     total_time_seconds += 1e-3 * starter.elapsed_time(ender)
 
     for epoch in range(math.ceil(epochs)):
-        
+
         model[0].bias.requires_grad = (epoch <= 2)
 
         ####################
