@@ -63,7 +63,7 @@ hyp = {
         'bias_scaler': 64.0,    # how much to scale up learning rate (but not weight decay) for BatchNorm biases
         'label_smoothing': 0.2,
         'ema': {
-            'start_epochs': 2,
+            'start_epochs': 3,
             'decay_base': 0.95,
             'decay_pow': 3.,
             'every_n_steps': 5,
@@ -263,6 +263,7 @@ def make_net():
         nn.Linear(depths['block3'], 10, bias=False),
         Mul(hyp['net']['scaling_factor']),
     )
+    net[0].weight.requires_grad = False
     net = net.cuda()
     net = net.to(memory_format=torch.channels_last)
     net.half()
@@ -303,7 +304,6 @@ def init_whitening_conv(layer, train_set, eps=5e-4):
     eigenvalues, eigenvectors = get_whitening_parameters(patches)
     eigenvectors_scaled = eigenvectors / torch.sqrt(eigenvalues + eps)
     layer.weight.data[:] = torch.cat((eigenvectors_scaled, -eigenvectors_scaled))
-    layer.weight.requires_grad = False
 
 ############################################
 #                Lookahead                 #
@@ -355,7 +355,7 @@ def print_training_details(variables, is_final_entry):
 #             Train and Eval               #
 ############################################
 
-def main(run, model):
+def main(run, model_trainbias, model_freezebias):
 
     batch_size = hyp['opt']['batch_size']
     epochs = hyp['opt']['train_epochs']
@@ -378,17 +378,24 @@ def main(run, model):
                             [0, int(0.23 * total_train_steps), total_train_steps],
                             [0.2, 1, 0.07]) # triangular learning rate schedule
 
-    reinit_net(model)
+    # Reinitialize the network from scratch - nothing is reused from previous runs besides the PyTorch compilation
+    reinit_net(model_trainbias)
     lookahead_state = None
     current_steps = 0
 
-    params = [(k, p) for k, p in model.named_parameters() if p.requires_grad]
-    norm_biases = [p for k, p in params if 'norm' in k]
-    other_params = [p for k, p in params if 'norm' not in k] # convolutional filters, first layer bias, and final linear layer
+    norm_biases = [p for k, p in model_trainbias.named_parameters() if 'norm' in k]
+    other_params = [p for k, p in model_trainbias.named_parameters() if 'norm' not in k]
     param_configs = [dict(params=norm_biases, lr=lr*bias_scaler, weight_decay=(wd / (lr*bias_scaler))),
                      dict(params=other_params, lr=lr, weight_decay=(wd / lr))]
-    optimizer = torch.optim.SGD(param_configs, momentum=momentum, nesterov=True)
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule.__getitem__)
+    optimizer_trainbias = torch.optim.SGD(param_configs, momentum=momentum, nesterov=True)
+    scheduler_trainbias = torch.optim.lr_scheduler.LambdaLR(optimizer_trainbias, lambda i: lr_schedule[i])
+
+    norm_biases = [p for k, p in model_freezebias.named_parameters() if 'norm' in k]
+    other_params = [p for k, p in model_freezebias.named_parameters() if 'norm' not in k]
+    param_configs = [dict(params=norm_biases, lr=lr*bias_scaler, weight_decay=(wd / (lr*bias_scaler))),
+                     dict(params=other_params, lr=lr, weight_decay=(wd / lr))]
+    optimizer_freezebias = torch.optim.SGD(param_configs, momentum=momentum, nesterov=True)
+    scheduler_freezebias = torch.optim.lr_scheduler.LambdaLR(optimizer_freezebias, lambda i: lr_schedule[i])
 
     ## For accurately timing GPU code
     starter = torch.cuda.Event(enable_timing=True)
@@ -399,12 +406,25 @@ def main(run, model):
     ## Initialize the whitening layer using training images
     starter.record()
     train_images = train_loader.images[:5000]
-    init_whitening_conv(model._orig_mod[0], train_images)
+    init_whitening_conv(model_trainbias._orig_mod[0], train_images)
     ender.record()
     torch.cuda.synchronize()
     total_time_seconds += 1e-3 * starter.elapsed_time(ender)
 
     for epoch in range(math.ceil(epochs)):
+
+        # Switch to model with frozen whiten bias
+        if epoch < 3:
+            model = model_trainbias
+            optimizer = optimizer_trainbias
+            scheduler = scheduler_trainbias
+        elif epoch == 3:
+            model = model_freezebias
+            optimizer = optimizer_freezebias
+            scheduler = scheduler_freezebias
+            model.load_state_dict(model_trainbias.state_dict())
+            optimizer.load_state_dict(optimizer_trainbias.state_dict())
+            scheduler.load_state_dict(scheduler_trainbias.state_dict())
         
         ####################
         #     Training     #
@@ -526,12 +546,16 @@ if __name__ == "__main__":
         code = f.read()
 
     # Make a single compiled model, which is re-initialized from scratch every run.
-    model = make_net()
-    model = torch.compile(model, mode='max-autotune')
+    model_trainbias = make_net()
+    model_trainbias = torch.compile(model_trainbias, mode='max-autotune')
+
+    model_freezebias = make_net()
+    model_freezebias[0].bias.requires_grad = False
+    model_freezebias = torch.compile(model_freezebias, mode='max-autotune')
 
     print_columns(logging_columns_list, is_head=True)
-    main('warmup', model)
-    accs = torch.tensor([main(run, model) for run in range(25)])
+    main('warmup', model_trainbias, model_freezebias)
+    accs = torch.tensor([main(run, model_trainbias, model_freezebias) for run in range(25)])
     print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
     log = {'code': code, 'accs': accs}
