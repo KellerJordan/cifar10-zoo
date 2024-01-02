@@ -47,6 +47,10 @@
 # uses 1,148 TFLOPs and runs in 15.1 seconds (on an A100). And the standard 200-epoch ResNet18 training
 # on CIFAR-10 uses ~30,000 TFLOPs and runs in minutes.
 #
+# This script is descended from https://github.com/tysam-code/hlb-CIFAR10 [1], which itself is descended
+# from David Page's training script [2]. The latter was the winning submission to the Stanford DAWNbench
+# competition for CIFAR-10 in 2018, with a time of 26 seconds to 94% accuracy on an NVIDIA V100.
+#
 # 1. tysam-code. "CIFAR-10 hyperlightspeedbench." https://github.com/tysam-code/hlb-CIFAR10. Jan 01 (2024).
 # 2. Page, David. "How to train your resnet." Myrtle, https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/. Sept 24 (2018).
 
