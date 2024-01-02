@@ -1,7 +1,7 @@
 # airbench_cifar10.py
 #
 # This script is designed to reach 94% accuracy on the CIFAR-10 test-set in the shortest possible time
-# after first seeing the training set. It achieves that target in a runtime of 4.1 seconds on a single
+# after first seeing the training set. It achieves that target in a runtime of 3.8 seconds on a single
 # NVIDIA A100.
 #
 # This script descends from https://github.com/tysam-code/hlb-CIFAR10. We use the following methods:
@@ -31,9 +31,10 @@
 #    yields more accurate estimates for very short trainings than the standard setting of 0.9.
 # 6. We use GPU-accelerated dataloading, which is of course crucial. A generic fast CIFAR-10 dataloader
 #    can be found at https://github.com/KellerJordan/cifar10-loader.
+# 7. We use torch.compile with mode='max-autotune'.
 #
 # To confirm that the mean accuracy is above 94%, we ran a test of n=100 runs, which yielded an
-# average accuracy of 94.04% (p<0.0001 for the true mean being below 94%, via t-test).
+# average accuracy of 94.04% (p<0.001 for the true mean being below 94%, via t-test).
 #
 # The 8-layer convnet we train has 2M parameters and uses 0.24 GFLOPs per forward pass. The entire
 # training run uses 366 TFLOPs, which could theoretically take 1.17 A100-seconds at perfect utilization.
@@ -44,6 +45,7 @@
 # on CIFAR-10 uses ~30,000 TFLOPs and runs in minutes.
 #
 # 1. Page, David. "How to train your resnet." Myrtle, https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/. Sept 24 (2018).
+# 2. "CIFAR-10 hyperlightspeedbench" https://github.com/tysam-code/hlb-CIFAR10. Jan 01 (2024).
 
 
 #############################################
@@ -73,7 +75,7 @@ hyp = {
         'bias_scaler': 64.0,    # how much to scale up learning rate (but not weight decay) for BatchNorm biases
         'label_smoothing': 0.2,
         'ema': {
-            'start_epochs': 2,
+            'start_epochs': 3,
             'decay_base': 0.95,
             'decay_pow': 3.,
             'every_n_steps': 5,
@@ -279,6 +281,7 @@ def make_net():
         nn.Linear(depths['block3'], 10, bias=False),
         Mul(hyp['net']['scaling_factor']),
     )
+    net[0].weight.requires_grad = False
     net = net.cuda()
     net = net.to(memory_format=torch.channels_last)
     net.half()
@@ -286,6 +289,18 @@ def make_net():
         if isinstance(mod, BatchNorm):
             mod.float()
     return net
+
+def reinit_net(model):
+    for m in model.modules():
+        if type(m) in (Conv, BatchNorm, nn.Linear):
+            m.reset_parameters()
+            if type(m) == Conv and m.bias is not None:
+                m.bias.data.zero_()
+        if type(m) is BatchNorm:
+            m.reset_running_stats()
+    for m in model.modules():
+        if type(m) in (ConvGroup,):
+            m.init()
 
 #############################################
 #       Whitening Conv Initialization       #
@@ -307,13 +322,13 @@ def init_whitening_conv(layer, train_set, eps=5e-4):
     eigenvalues, eigenvectors = get_whitening_parameters(patches)
     eigenvectors_scaled = eigenvectors / torch.sqrt(eigenvalues + eps)
     layer.weight.data[:] = torch.cat((eigenvectors_scaled, -eigenvectors_scaled))
-    layer.weight.requires_grad = False
 
 ############################################
 #                Lookahead                 #
 ############################################
 
 class LookaheadState:
+
     def __init__(self, net):
         self.net_ema = {k: v.clone() for k, v in net.state_dict().items()}
 
@@ -339,11 +354,11 @@ def print_columns(columns_list, is_head=False, is_final_entry=False):
     if is_head or is_final_entry:
         print('-'*len(print_string))
 
-logging_columns_list = ['run', 'epoch', 'train_loss', 'val_loss', 'train_acc', 'val_acc', 'tta_val_acc', 'total_time_seconds']
+logging_columns_list = ['run   ', 'epoch', 'train_loss', 'val_loss', 'train_acc', 'val_acc', 'tta_val_acc', 'total_time_seconds']
 def print_training_details(variables, is_final_entry):
     formatted = []
     for col in logging_columns_list:
-        var = variables.get(col, None)
+        var = variables.get(col.strip(), None)
         if type(var) in (int, str):
             res = str(var)
         elif type(var) is float:
@@ -358,7 +373,7 @@ def print_training_details(variables, is_final_entry):
 #             Train and Eval               #
 ############################################
 
-def main(run):
+def main(run, model_trainbias, model_freezebias):
 
     batch_size = hyp['opt']['batch_size']
     epochs = hyp['opt']['train_epochs']
@@ -373,7 +388,7 @@ def main(run):
     train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=batch_size, aug=train_augs)
     test_loader = PrepadCifarLoader('/tmp/cifar10', train=False, batch_size=2000)
     if run == 'warmup':
-        # The only purpose of the first run is to warmup, so we can use dummy data
+        # The only purpose of the first run is to warmup the compiled model, so we can use dummy data
         train_loader.labels = torch.randint(0, 10, size=(len(train_loader.labels),), device=train_loader.labels.device)
 
     total_train_steps = math.ceil(len(train_loader) * epochs)
@@ -381,17 +396,24 @@ def main(run):
                             [0, int(0.23 * total_train_steps), total_train_steps],
                             [0.2, 1, 0.07]) # triangular learning rate schedule
 
-    model = make_net()
+    # Reinitialize the network from scratch - nothing is reused from previous runs besides the PyTorch compilation
+    reinit_net(model_trainbias)
     lookahead_state = None
     current_steps = 0
 
-    params = [(k, p) for k, p in model.named_parameters() if p.requires_grad]
-    norm_biases = [p for k, p in params if 'norm' in k]
-    other_params = [p for k, p in params if 'norm' not in k] # convolutional filters, first layer bias, and final linear layer
+    norm_biases = [p for k, p in model_trainbias.named_parameters() if 'norm' in k]
+    other_params = [p for k, p in model_trainbias.named_parameters() if 'norm' not in k]
     param_configs = [dict(params=norm_biases, lr=lr*bias_scaler, weight_decay=(wd / (lr*bias_scaler))),
                      dict(params=other_params, lr=lr, weight_decay=(wd / lr))]
-    optimizer = torch.optim.SGD(param_configs, momentum=momentum, nesterov=True)
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule.__getitem__)
+    optimizer_trainbias = torch.optim.SGD(param_configs, momentum=momentum, nesterov=True)
+    scheduler_trainbias = torch.optim.lr_scheduler.LambdaLR(optimizer_trainbias, lambda i: lr_schedule[i])
+
+    norm_biases = [p for k, p in model_freezebias.named_parameters() if 'norm' in k]
+    other_params = [p for k, p in model_freezebias.named_parameters() if 'norm' not in k]
+    param_configs = [dict(params=norm_biases, lr=lr*bias_scaler, weight_decay=(wd / (lr*bias_scaler))),
+                     dict(params=other_params, lr=lr, weight_decay=(wd / lr))]
+    optimizer_freezebias = torch.optim.SGD(param_configs, momentum=momentum, nesterov=True)
+    scheduler_freezebias = torch.optim.lr_scheduler.LambdaLR(optimizer_freezebias, lambda i: lr_schedule[i])
 
     ## For accurately timing GPU code
     starter = torch.cuda.Event(enable_timing=True)
@@ -402,15 +424,26 @@ def main(run):
     ## Initialize the whitening layer using training images
     starter.record()
     train_images = train_loader.normalize(train_loader.images[:5000])
-    init_whitening_conv(model[0], train_images)
+    init_whitening_conv(model_trainbias._orig_mod[0], train_images)
     ender.record()
     torch.cuda.synchronize()
     total_time_seconds += 1e-3 * starter.elapsed_time(ender)
 
     for epoch in range(math.ceil(epochs)):
 
-        model[0].bias.requires_grad = (epoch <= hyp['opt']['whiten_bias_epochs'])
-
+        ## After training the whiten bias for some epochs, swap in the compiled model with frozen bias
+        if epoch == 0:
+            model = model_trainbias
+            optimizer = optimizer_trainbias
+            scheduler = scheduler_trainbias
+        elif epoch == hyp['opt']['whiten_bias_epochs']:
+            model = model_freezebias
+            optimizer = optimizer_freezebias
+            scheduler = scheduler_freezebias
+            model.load_state_dict(model_trainbias.state_dict())
+            optimizer.load_state_dict(optimizer_trainbias.state_dict())
+            scheduler.load_state_dict(scheduler_trainbias.state_dict())
+        
         ####################
         #     Training     #
         ####################
@@ -486,7 +519,7 @@ def main(run):
         ## This creates 8 inputs per image (left/right times the four directions),
         ## which we evaluate and then weight according to the given probabilities.
 
-        test_images = train_loader.normalize(test_loader.images)
+        test_images = test_loader.normalize(test_loader.images)
         test_labels = test_loader.labels
 
         def infer_basic(inputs, net):
@@ -530,9 +563,20 @@ if __name__ == "__main__":
     with open(sys.argv[0]) as f:
         code = f.read()
 
+    ## These compiled models are first warmed up, and then reinitialized every run. No learned
+    ## weights are reused between runs. To implement freezing of the whiten bias parameter
+    ## midway through training, we use two compiled models, one with trainable and the other
+    ## frozen whiten bias. This is faster than the naive approach of setting the bias
+    ## requires_grad=False midway through training on a single compiled model.
+    model_trainbias = make_net()
+    model_freezebias = make_net()
+    model_freezebias[0].bias.requires_grad = False
+    model_trainbias = torch.compile(model_trainbias, mode='max-autotune')
+    model_freezebias = torch.compile(model_freezebias, mode='max-autotune')
+
     print_columns(logging_columns_list, is_head=True)
-    main('warmup')
-    accs = torch.tensor([main(run) for run in range(25)])
+    main('warmup', model_trainbias, model_freezebias)
+    accs = torch.tensor([main(run, model_trainbias, model_freezebias) for run in range(25)])
     print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
     log = {'code': code, 'accs': accs}
