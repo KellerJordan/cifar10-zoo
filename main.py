@@ -22,7 +22,7 @@
 #    At epoch two we flip exactly those images which weren't flipped in the first epoch. Then epoch
 #    three flips the same images as epoch one, four the same as two, and so on. We find that this
 #    decreases the number of steps to 94% accuracy by roughly 10%. We hypothesize that this is because
-#    the standard fully random flipping is wasteful in the sense that e.g. 1/8 of images will be
+#    the standard fully random flipping is wasteful in the sense that (e.g.,) 1/8 of images will be
 #    flipped the same way for the first four epochs, effectively resulting in less new images seen
 #    per epoch as compared to our semi-deterministic alternating scheme.
 # 4. Following Page (2018), we use Nesterov SGD with a triangular learning rate schedule and increased
@@ -572,11 +572,11 @@ if __name__ == "__main__":
     with open(sys.argv[0]) as f:
         code = f.read()
 
-    # These compiled models are first warmed up, and then reinitialized every run. No learned
-    # weights are reused between runs. To implement freezing of the whiten bias parameter
-    # midway through training, we use two compiled models, one with trainable and the other
-    # frozen whiten bias. This is faster than the naive approach of setting the bias
-    # requires_grad=False midway through training on a single compiled model.
+    # These two compiled models are first warmed up, and then reinitialized every run. No learned
+    # weights are reused between runs. To implement freezing of the whitening-layer bias parameter
+    # midway through training, we use two compiled models, one with trainable and the other with
+    # frozen whitening bias. This is faster than the naive approach of setting requires_grad=False
+    # on the whitening bias midway through training on a single compiled model.
     model_trainbias = make_net()
     model_freezebias = make_net()
     model_freezebias[0].bias.requires_grad = False

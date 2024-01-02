@@ -22,7 +22,7 @@
 #    At epoch two we flip exactly those images which weren't flipped in the first epoch. Then epoch
 #    three flips the same images as epoch one, four the same as two, and so on. We find that this
 #    decreases the number of steps to 94% accuracy by roughly 10%. We hypothesize that this is because
-#    the standard fully random flipping is wasteful in the sense that e.g. 1/8 of images will be
+#    the standard fully random flipping is wasteful in the sense that (e.g.,) 1/8 of images will be
 #    flipped the same way for the first four epochs, effectively resulting in less new images seen
 #    per epoch as compared to our semi-deterministic alternating scheme.
 # 4. Following Page (2018), we use Nesterov SGD with a triangular learning rate schedule and increased
