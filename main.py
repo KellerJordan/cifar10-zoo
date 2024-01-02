@@ -36,7 +36,7 @@
 # average accuracy of 94.016% (p<0.0001 for the true mean being below 94%, via t-test).
 #
 # The 8-layer convnet we train has 2M parameters and uses 0.24 GFLOPs per forward pass. The entire
-# training run uses 362 TFLOPs, which could theoretically take 1.16 A100-seconds at perfect utilization.
+# training run uses 369 TFLOPs, which could theoretically take 1.18 A100-seconds at perfect utilization.
 #
 # For comparison, version 0.7.0 of https://github.com/tysam-code/hlb-CIFAR10 uses 587 TFLOPs and runs in
 # 6.2 seconds. The final training script from David Page's series "How to Train Your ResNet" (Page 2018)
@@ -66,7 +66,7 @@ torch.backends.cudnn.benchmark = True
 hyp = {
     'opt': {
         'batch_size': 1024,
-        'train_epochs': 10.0,
+        'train_epochs': 10.2,
         'lr': 1.5,              # learning rate per step
         'momentum': 0.85,
         'weight_decay': 2e-3,   # weight decay per step (will not be scaled up by lr)
