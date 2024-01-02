@@ -68,6 +68,7 @@ hyp = {
             'decay_pow': 3.,
             'every_n_steps': 5,
         },
+        'whiten_bias_epochs': 3 # how many epochs to train the whitening layer bias before freezing
     },
     'aug': {
         'flip': True,
@@ -395,7 +396,7 @@ def main(run):
 
     for epoch in range(math.ceil(epochs)):
 
-        model[0].bias.requires_grad = (epoch <= 2)
+        model[0].bias.requires_grad = (epoch <= hyp['opt']['whiten_bias_epochs'])
 
         ####################
         #     Training     #

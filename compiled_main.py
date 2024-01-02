@@ -68,6 +68,7 @@ hyp = {
             'decay_pow': 3.,
             'every_n_steps': 5,
         },
+        'whiten_bias_epochs': 3 # how many epochs to train the whitening layer bias before freezing
     },
     'aug': {
         'flip': True,
@@ -418,12 +419,12 @@ def main(run, model_trainbias, model_freezebias):
 
     for epoch in range(math.ceil(epochs)):
 
-        # Switch to model with frozen whiten bias
-        if epoch < 3:
+        ## After training the whiten bias for some epochs, swap in the compiled model with frozen bias
+        if epoch == 0:
             model = model_trainbias
             optimizer = optimizer_trainbias
             scheduler = scheduler_trainbias
-        elif epoch == 3:
+        elif epoch == hyp['opt']['whiten_bias_epochs']:
             model = model_freezebias
             optimizer = optimizer_freezebias
             scheduler = scheduler_freezebias
@@ -550,12 +551,15 @@ if __name__ == "__main__":
     with open(sys.argv[0]) as f:
         code = f.read()
 
-    # Make a single compiled model, which is re-initialized from scratch every run.
+    ## These compiled models are first warmed up, and then reinitialized every run. No learned
+    ## weights are reused between runs. To implement freezing of the whiten bias parameter
+    ## midway through training, we use two compiled models, one with trainable and the other
+    ## frozen whiten bias. This is faster than the naive approach of setting the bias
+    ## requires_grad=False midway through training on a single compiled model.
     model_trainbias = make_net()
-    model_trainbias = torch.compile(model_trainbias, mode='max-autotune')
-
     model_freezebias = make_net()
     model_freezebias[0].bias.requires_grad = False
+    model_trainbias = torch.compile(model_trainbias, mode='max-autotune')
     model_freezebias = torch.compile(model_freezebias, mode='max-autotune')
 
     print_columns(logging_columns_list, is_head=True)
