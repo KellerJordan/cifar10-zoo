@@ -94,7 +94,7 @@ hyp = {
         'batchnorm_momentum': 0.6,
         'base_depth': 64,
         'scaling_factor': 1/9,
-        'tta_level': 2,         # The level of test-time augmentation. 0=none, 1=mirror, 2=mirror+translate. More TTA takes longer but gives higher accuracy.
+        'tta_level': 2,         # the level of test-time augmentation: 0=none, 1=mirror, 2=mirror+translate
     },
 }
 
