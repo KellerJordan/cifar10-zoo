@@ -1,7 +1,7 @@
 # airbench_cifar10.py
 #
 # This script is designed to reach 94% accuracy on the CIFAR-10 test-set in the shortest possible time
-# after first seeing the training set. It achieves that target in a runtime of 3.8 seconds on a single
+# after first seeing the training set. It achieves that target in a runtime of 3.7 seconds on a single
 # NVIDIA A100.
 #
 # This script descends from https://github.com/tysam-code/hlb-CIFAR10. We use the following methods:
@@ -36,8 +36,8 @@
 # To confirm that the mean accuracy is above 94%, we ran a test of n=1000 runs, which yielded an
 # average accuracy of 94.016% (p<0.0001 for the true mean being below 94%, via t-test).
 #
-# The 8-layer convnet we train has 3M parameters and uses 0.28 GFLOPs per forward pass. The entire
-# training run uses 401 TFLOPs, which could theoretically take 1.29 A100-seconds at perfect utilization.
+# The 8-layer convnet we train has 2M parameters and uses 0.24 GFLOPs per forward pass. The entire
+# training run uses 362 TFLOPs, which could theoretically take 1.16 A100-seconds at perfect utilization.
 #
 # For comparison, version 0.7.0 of https://github.com/tysam-code/hlb-CIFAR10 uses 587 TFLOPs and runs in
 # 6.2 seconds. The final training script from David Page's series "How to Train Your ResNet" (Page 2018)
@@ -45,6 +45,7 @@
 # on CIFAR-10 uses ~30,000 TFLOPs and runs in minutes.
 #
 # 1. Page, David. "How to train your resnet." Myrtle, https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/. Sept 24 (2018).
+# 2. "CIFAR-10 hyperlightspeedbench" https://github.com/tysam-code/hlb-CIFAR10. Jan 01 (2024).
 
 
 #############################################
@@ -67,7 +68,7 @@ torch.backends.cudnn.benchmark = True
 hyp = {
     'opt': {
         'batch_size': 1024,
-        'train_epochs': 9.3,
+        'train_epochs': 10.0,
         'lr': 1.5,              # learning rate per step
         'momentum': 0.85,
         'weight_decay': 2e-3,   # weight decay per step (will not be scaled up by lr)
@@ -266,7 +267,7 @@ def make_net():
     depths = {
         'block1': (1 * hyp['net']['base_depth']), # 64  w/ depth at base value
         'block2': (4 * hyp['net']['base_depth']), # 256 w/ depth at base value
-        'block3': (6 * hyp['net']['base_depth']), # 384 w/ depth at base value
+        'block3': (4 * hyp['net']['base_depth']), # 256 w/ depth at base value
     }
     whiten_conv_depth = 2 * 3 * hyp['net']['whitening']['kernel_size']**2
     net = nn.Sequential(

@@ -35,8 +35,8 @@
 # To confirm that the mean accuracy is above 94%, we ran a test of n=1000 runs, which yielded an
 # average accuracy of 94.016% (p<0.0001 for the true mean being below 94%, via t-test).
 #
-# The 8-layer convnet we train has 3M parameters and uses 0.28 GFLOPs per forward pass. The entire
-# training run uses 401 TFLOPs, which could theoretically take 1.29 A100-seconds at perfect utilization.
+# The 8-layer convnet we train has 2M parameters and uses 0.24 GFLOPs per forward pass. The entire
+# training run uses 362 TFLOPs, which could theoretically take 1.16 A100-seconds at perfect utilization.
 #
 # For comparison, version 0.7.0 of https://github.com/tysam-code/hlb-CIFAR10 uses 587 TFLOPs and runs in
 # 6.2 seconds. The final training script from David Page's series "How to Train Your ResNet" (Page 2018)
@@ -66,7 +66,7 @@ torch.backends.cudnn.benchmark = True
 hyp = {
     'opt': {
         'batch_size': 1024,
-        'train_epochs': 9.3,
+        'train_epochs': 10.0,
         'lr': 1.5,              # learning rate per step
         'momentum': 0.85,
         'weight_decay': 2e-3,   # weight decay per step (will not be scaled up by lr)
@@ -265,7 +265,7 @@ def make_net():
     depths = {
         'block1': (1 * hyp['net']['base_depth']), # 64  w/ depth at base value
         'block2': (4 * hyp['net']['base_depth']), # 256 w/ depth at base value
-        'block3': (6 * hyp['net']['base_depth']), # 384 w/ depth at base value
+        'block3': (4 * hyp['net']['base_depth']), # 256 w/ depth at base value
     }
     whiten_conv_depth = 2 * 3 * hyp['net']['whitening']['kernel_size']**2
     net = nn.Sequential(
@@ -372,6 +372,9 @@ def main(run):
 
     train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=batch_size, aug=train_augs)
     test_loader = PrepadCifarLoader('/tmp/cifar10', train=False, batch_size=2000)
+    if run == 'warmup':
+        # The only purpose of the first run is to warmup, so we can use dummy data
+        train_loader.labels = torch.randint(0, 10, size=(len(train_loader.labels),), device=train_loader.labels.device)
 
     total_train_steps = math.ceil(len(train_loader) * epochs)
     lr_schedule = np.interp(np.arange(1+total_train_steps),
@@ -528,6 +531,7 @@ if __name__ == "__main__":
         code = f.read()
 
     print_columns(logging_columns_list, is_head=True)
+    main('warmup')
     accs = torch.tensor([main(run) for run in range(25)])
     print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
