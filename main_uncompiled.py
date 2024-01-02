@@ -29,8 +29,8 @@
 #    like scheme with slow decay rate at the end of training, which saves an extra 0.35 seconds.
 # 5. Following hlb-CIFAR10, we use a low momentum of 0.6 for running BatchNorm stats, which we find
 #    yields more accurate estimates for very short trainings than the standard setting of 0.9.
-# 6. We use GPU-accelerated dataloading, which is of course crucial. A generic fast CIFAR-10 dataloader
-#    can be found at https://github.com/KellerJordan/cifar10-loader.
+# 6. We use GPU-accelerated dataloading and augmentation. A generic fast CIFAR-10 dataloader can be
+#    found at https://github.com/KellerJordan/cifar10-loader.
 #
 # To confirm that the mean accuracy is above 94%, we ran a test of n=700 runs, which yielded an
 # average accuracy of 94.02% (p<0.0001 for the true mean being below 94%, via t-test).
