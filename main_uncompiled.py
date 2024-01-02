@@ -1,7 +1,7 @@
 # airbench_cifar10.py
 #
 # This script is designed to reach 94% accuracy on the CIFAR-10 test-set in the shortest possible time
-# after first seeing the training set. It has a runtime of 3.9 seconds on a single NVIDIA A100.
+# after first seeing the training set. It runs in 3.9 seconds on a single NVIDIA A100.
 #
 # This script descends from https://github.com/tysam-code/hlb-CIFAR10. We use the following methods:
 #
