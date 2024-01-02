@@ -45,8 +45,7 @@
 # on CIFAR-10 uses ~30,000 TFLOPs and runs in minutes.
 #
 # 1. Page, David. "How to train your resnet." Myrtle, https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/. Sept 24 (2018).
-# 2. "CIFAR-10 hyperlightspeedbench" https://github.com/tysam-code/hlb-CIFAR10. Jan 01 (2024).
-
+# 2. "CIFAR-10 hyperlightspeedbench." https://github.com/tysam-code/hlb-CIFAR10. Jan 01 (2024).
 
 #############################################
 #            Setup/Hyperparameters          #
