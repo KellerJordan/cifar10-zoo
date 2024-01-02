@@ -3,7 +3,7 @@
 # This script is designed to reach 94% accuracy on the CIFAR-10 test-set in the shortest possible time
 # after first seeing the training set. It runs in 3.9 seconds on a single NVIDIA A100.
 #
-# This script descends from https://github.com/tysam-code/hlb-CIFAR10. We use the following methods:
+# We use the following methods:
 #
 # 1. Our network architecture is an 8-layer convnet with whitening and identity initialization.
 #    * Following Page (2018), the first convolution is initialized as a frozen patch-whitening layer
@@ -11,7 +11,8 @@
 #      BatchNorm affine weights are disabled.
 #    * Following hlb-CIFAR10, the whitening layer has patch size 2, precedes an activation, and is
 #      concatenated with its negation to ensure completeness. The six remaining convolutional layers
-#      lack residual connections and are initialized as identity transforms wherever possible.
+#      lack residual connections and are initialized as identity transforms wherever possible. The
+#      8-layer architecture is also following hlb-CIFAR10. We use reduced depth in the final layer.
 #    * We add a learnable bias to the whitening layer, which increases accuracy by ~0.10%. We find
 #      it trains quickly, so we save training time by freezing it after 3 epochs.
 # 2. For test-time augmentation we use horizontal flipping and we add one-pixel translation.
@@ -46,8 +47,8 @@
 # uses 1,148 TFLOPs and runs in 15.1 seconds (on an A100). And the standard 200-epoch ResNet18 training
 # on CIFAR-10 uses ~30,000 TFLOPs and runs in minutes.
 #
-# 1. Page, David. "How to train your resnet." Myrtle, https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/. Sept 24 (2018).
-# 2. tysam-code. "CIFAR-10 hyperlightspeedbench." https://github.com/tysam-code/hlb-CIFAR10. Jan 01 (2024).
+# 1. tysam-code. "CIFAR-10 hyperlightspeedbench." https://github.com/tysam-code/hlb-CIFAR10. Jan 01 (2024).
+# 2. Page, David. "How to train your resnet." Myrtle, https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/. Sept 24 (2018).
 
 #############################################
 #            Setup/Hyperparameters          #
