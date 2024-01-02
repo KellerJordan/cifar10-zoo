@@ -1,7 +1,7 @@
 # airbench_cifar10.py
 #
 # This script is designed to reach 94% accuracy on the CIFAR-10 test-set in the shortest possible time
-# after first seeing the training set. It has a runtime of 3.8 seconds on a single NVIDIA A100.
+# after first seeing the training set. It has a runtime of 3.5 seconds on a single 80GB NVIDIA A100.
 #
 # This script descends from https://github.com/tysam-code/hlb-CIFAR10. We use the following methods:
 #
@@ -32,8 +32,15 @@
 #    can be found at https://github.com/KellerJordan/cifar10-loader.
 # 7. We use torch.compile with mode='max-autotune'.
 #
-# To confirm that the mean accuracy is above 94%, we ran a test of n=1000 runs, which yielded an
-# average accuracy of 94.04% (p<0.0001 for the true mean being below 94%, via t-test).
+# To confirm that the mean accuracy is above 94%, we ran a test of n=700 runs, which yielded an
+# average accuracy of 94.02% (p<0.0001 for the true mean being below 94%, via t-test).
+#
+# We recorded the runtime of 3.5 seconds on an NVIDIA A100-SXM4-80GB with the following nvidia-smi:
+# NVIDIA-SMI 515.105.01   Driver Version: 515.105.01   CUDA Version: 11.7
+# torch.__version__ == '2.1.2+cu118'
+#
+# Note that the first time this script is run, compilation takes up to two minutes. Without the usage
+# of torch.compile, this script warms up in <10 seconds and takes 3.83 seconds per run.
 #
 # The 8-layer convnet we train has 2M parameters and uses 0.24 GFLOPs per forward pass. The entire
 # training run uses 366 TFLOPs, which could theoretically take 1.17 A100-seconds at perfect utilization.
@@ -66,7 +73,7 @@ torch.backends.cudnn.benchmark = True
 hyp = {
     'opt': {
         'batch_size': 1024,
-        'train_epochs': 10.1,
+        'train_epochs': 9.9,
         'lr': 1.5,              # learning rate per step
         'momentum': 0.85,
         'weight_decay': 2e-3,   # weight decay per step (will not be scaled up by lr)
