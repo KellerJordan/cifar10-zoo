@@ -14,12 +14,20 @@
 #    * The six remaining convolutional layers are initialized as identity transforms wherever possible.
 #    * Following Page (2018), the logit output is downscaled and BatchNorm affine weights are disabled.
 # 2. For test-time augmentation, we use horizontal flipping and one-pixel translation.
-# 3. Following Page (2018), we use Nesterov SGD with a triangular learning rate schedule and increased
+# 3. For training data augmentation, we use horizontal flipping and random two-pixel translation. For
+#    horizontal flipping we use a novel scheme: for the first epoch, images are randomy flipped as
+#    usual. For epoch two, we flip exactly those images which weren't flipped in the first epoch. Then
+#    epoch three uses the same epochs as epoch one, and four the same as two, and so on. We find that
+#    this decreases the number of steps to 94% accuracy by roughly 9%. We hypothesize that this is
+#    because the standard fully random flipping is wasteful in the sense that e.g. 1/8 of images will
+#    be flipped the same way for the first four epochs, resulting in less effective images seen per
+#    step as compared to our semi-deterministic alternating scheme.
+# 4. Following Page (2018), we use Nesterov SGD with a triangular learning rate schedule and increased
 #    learning rate for BatchNorm biases. On top of this, following hlb-CIFAR10, we use a lookahead-
 #    like scheme with slow decay rate at the end of training, which saves an extra 0.35 seconds.
-# 4. Following hlb-CIFAR10, we use a low momentum of 0.6 for running BatchNorm stats, which we find
+# 5. Following hlb-CIFAR10, we use a low momentum of 0.6 for running BatchNorm stats, which we find
 #    yields more accurate estimates for very short trainings than the standard setting of 0.9.
-# 5. We use GPU-accelerated dataloading, which is of course crucial. A generic fast CIFAR-10 dataloader
+# 6. We use GPU-accelerated dataloading, which is of course crucial. A generic fast CIFAR-10 dataloader
 #    can be found at https://github.com/KellerJordan/cifar10-loader.
 #
 # To confirm that the mean accuracy is above 94%, we ran a test of n=1000 runs, which yielded an
