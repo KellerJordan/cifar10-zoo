@@ -144,40 +144,45 @@ class PrepadCifarLoader:
         self.images = (self.images.half() / 255).permute(0, 3, 1, 2).to(memory_format=torch.channels_last)
 
         self.normalize = T.Normalize(CIFAR_MEAN, CIFAR_STD)
-        self.denormalize = T.Normalize(-CIFAR_MEAN / CIFAR_STD, 1 / CIFAR_STD)
+        self.proc_images = {} # Saved results of image processing to be done on the first epoch
+        self.epoch = 0
 
         self.aug = aug or {}
         for k in self.aug.keys():
             assert k in ['flip', 'translate'], 'Unrecognized key: %s' % k
 
-        # Pre-flip images in order to do every-other epoch flipping scheme
-        self.images = self.normalize(self.images)
-        if self.aug.get('flip', False):
-            self.images = batch_flip_lr(self.images)
-        self.augment_calls = 0
-        # Pre-pad images to save time when doing random translation
-        pad = self.aug.get('translate', 0)
-        self.padded_images = F.pad(self.images, (pad,)*4, 'reflect') if pad > 0 else None
-
         self.batch_size = batch_size
         self.drop_last = train if drop_last is None else drop_last
         self.shuffle = train if shuffle is None else shuffle
-
-    def augment_prepad(self, images):
-        if self.aug.get('translate', 0) > 0:
-            images = batch_crop(images, self.images.shape[-2])
-        if self.aug.get('flip', False):
-            # Flip all images together every other epoch. This increases diversity relative to random flipping
-            if self.augment_calls % 2 == 1:
-                images = images.flip(-1)
-        self.augment_calls += 1
-        return images
 
     def __len__(self):
         return len(self.images)//self.batch_size if self.drop_last else ceil(len(self.images)/self.batch_size)
 
     def __iter__(self):
-        images = self.augment_prepad(self.padded_images if self.padded_images is not None else self.images)
+
+        if self.epoch == 0:
+            images = self.proc_images['norm'] = self.normalize(self.images)
+            # Pre-flip images in order to do every-other epoch flipping scheme
+            if self.aug.get('flip', False):
+                images = self.proc_images['flip'] = batch_flip_lr(images)
+            # Pre-pad images to save time when doing random translation
+            pad = self.aug.get('translate', 0)
+            if pad > 0:
+                self.proc_images['pad'] = F.pad(images, (pad,)*4, 'reflect')
+
+        if self.aug.get('translate', 0) > 0:
+            images = batch_crop(self.proc_images['pad'], self.images.shape[-2])
+        elif self.aug.get('flip', False):
+            images = self.proc_images['flip']
+        else:
+            images = self.proc_images['norm']
+        # Flip all images together every other epoch. This increases diversity relative to random flipping
+        if self.aug.get('flip', False):
+            if self.epoch % 2 == 1:
+                images = images.flip(-1)
+
+        self.epoch += 1
+
         indices = (torch.randperm if self.shuffle else torch.arange)(len(images), device=images.device)
         for i in range(len(self)):
             idxs = indices[i*self.batch_size:(i+1)*self.batch_size]
@@ -382,7 +387,7 @@ def main(run):
 
     ## Initialize the whitening layer using training images
     starter.record()
-    train_images = train_loader.images[:5000]
+    train_images = train_loader.normalize(train_loader.images[:5000])
     init_whitening_conv(model[0], train_images)
     ender.record()
     torch.cuda.synchronize()
@@ -467,7 +472,7 @@ def main(run):
         ## This creates 8 inputs per image (left/right times the four directions),
         ## which we evaluate and then weight according to the given probabilities.
 
-        test_images = test_loader.images
+        test_images = train_loader.normalize(test_loader.images)
         test_labels = test_loader.labels
 
         def infer_basic(inputs, net):
