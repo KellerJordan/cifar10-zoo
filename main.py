@@ -19,7 +19,7 @@
 # 3. For training data augmentation we use horizontal flipping and random two-pixel translation. For
 #    horizontal flipping we follow a novel scheme. At epoch one images are randomly flipped as usual.
 #    At epoch two we flip exactly those images which weren't flipped in the first epoch. Then epoch
-#    three flips the same images as epoch one, and four the same as two, and so on. We find that this
+#    three flips the same images as epoch one, four the same as two, and so on. We find that this
 #    decreases the number of steps to 94% accuracy by roughly 9%. We hypothesize that this is because
 #    the standard fully random flipping is wasteful in the sense that e.g. 1/8 of images will be
 #    flipped the same way for the first four epochs, effectively resulting in less new images seen
