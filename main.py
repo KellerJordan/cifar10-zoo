@@ -1,27 +1,29 @@
 # airbench_cifar10.py
 #
 # This script is designed to reach 94% accuracy on the CIFAR-10 test-set in the shortest possible time
-# after first seeing the training set. It achieves that target in a runtime of 4.4 seconds on a single
+# after first seeing the training set. It achieves that target in a runtime of 4.1 seconds on a single
 # NVIDIA A100.
 #
 # This script descends from https://github.com/tysam-code/hlb-CIFAR10. We use the following methods:
 #
 # 1. Our network architecture is a custom 8-layer convnet with whitening and identity initialization.
 #    * Following Page (2018), the first convolution is initialized as a frozen patch-whitening layer
-#      using statistics from the training images.
-#    * Following hlb-CIFAR10, the whitening layer precedes an activation, and is concatenated with its
-#      negation to ensure completeness. We also add a learnable bias, which is frozen after 3 epochs.
-#    * The six remaining convolutional layers are initialized as identity transforms wherever possible.
-#    * Following Page (2018), the logit output is downscaled and BatchNorm affine weights are disabled.
-# 2. For test-time augmentation, we use horizontal flipping and one-pixel translation.
-# 3. For training data augmentation, we use horizontal flipping and random two-pixel translation. For
-#    horizontal flipping we use a novel scheme: for the first epoch, images are randomy flipped as
-#    usual. For epoch two, we flip exactly those images which weren't flipped in the first epoch. Then
-#    epoch three uses the same epochs as epoch one, and four the same as two, and so on. We find that
-#    this decreases the number of steps to 94% accuracy by roughly 9%. We hypothesize that this is
-#    because the standard fully random flipping is wasteful in the sense that e.g. 1/8 of images will
-#    be flipped the same way for the first four epochs, resulting in less effective images seen per
-#    step as compared to our semi-deterministic alternating scheme.
+#      using statistics from the training images. Additionally, the logit output is downscaled and
+#      BatchNorm affine weights are disabled.
+#    * Following hlb-CIFAR10, the whitening layer has patch size 2, precedes an activation, and is
+#      concatenated with its negation to ensure completeness. The six remaining convolutional layers
+#      lack residual connection and are initialized as identity transforms wherever possible.
+#    * We add a learnable bias to the whitening layer, which increases accuracy by ~0.10%. We find
+#      it trains quickly, so we save training time by freezing it after 3 epochs.
+# 2. For test-time augmentation we use horizontal flipping and we add one-pixel translation.
+# 3. For training data augmentation we use horizontal flipping and random two-pixel translation. For
+#    horizontal flipping we follow a novel scheme. At epoch one images are randomly flipped as usual.
+#    At epoch two we flip exactly those images which weren't flipped in the first epoch. Then epoch
+#    three flips the same images as epoch one, and four the same as two, and so on. We find that this
+#    decreases the number of steps to 94% accuracy by roughly 9%. We hypothesize that this is because
+#    the standard fully random flipping is wasteful in the sense that e.g. 1/8 of images will be
+#    flipped the same way for the first four epochs, effectively resulting in less new images seen
+#    per epoch as compared to our semi-deterministic alternating scheme.
 # 4. Following Page (2018), we use Nesterov SGD with a triangular learning rate schedule and increased
 #    learning rate for BatchNorm biases. On top of this, following hlb-CIFAR10, we use a lookahead-
 #    like scheme with slow decay rate at the end of training, which saves an extra 0.35 seconds.
