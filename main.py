@@ -36,7 +36,7 @@
 # average accuracy of 94.016% (p<0.0001 for the true mean being below 94%, via t-test).
 #
 # The 8-layer convnet we train has 3M parameters and uses 0.28 GFLOPs per forward pass. The entire
-# training run uses 413 TFLOPs, which could theoretically take 1.32 A100-seconds at perfect utilization.
+# training run uses 401 TFLOPs, which could theoretically take 1.29 A100-seconds at perfect utilization.
 #
 # For comparison, version 0.7.0 of https://github.com/tysam-code/hlb-CIFAR10 uses 587 TFLOPs and runs in
 # 6.2 seconds. The final training script from David Page's series "How to Train Your ResNet" (Page 2018)
