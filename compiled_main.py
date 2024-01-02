@@ -6,13 +6,13 @@
 #
 # This script descends from https://github.com/tysam-code/hlb-CIFAR10. We use the following methods:
 #
-# 1. Our network architecture is a custom 8-layer convnet with whitening and identity initialization.
+# 1. Our network architecture is an 8-layer convnet with whitening and identity initialization.
 #    * Following Page (2018), the first convolution is initialized as a frozen patch-whitening layer
 #      using statistics from the training images. Additionally, the logit output is downscaled and
 #      BatchNorm affine weights are disabled.
 #    * Following hlb-CIFAR10, the whitening layer has patch size 2, precedes an activation, and is
 #      concatenated with its negation to ensure completeness. The six remaining convolutional layers
-#      lack residual connection and are initialized as identity transforms wherever possible.
+#      lack residual connections and are initialized as identity transforms wherever possible.
 #    * We add a learnable bias to the whitening layer, which increases accuracy by ~0.10%. We find
 #      it trains quickly, so we save training time by freezing it after 3 epochs.
 # 2. For test-time augmentation we use horizontal flipping and we add one-pixel translation.
