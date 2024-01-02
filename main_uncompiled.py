@@ -140,8 +140,6 @@ def batch_crop(images, crop_size):
 
     return images_out
 
-## This is a pre-padded variant of quick_cifar.CifarLoader which moves the padding step of random translate
-## from __iter__ to __init__, so that it doesn't need to be repeated each epoch.
 class PrepadCifarLoader:
 
     def __init__(self, path, train=True, batch_size=500, aug=None, drop_last=None, shuffle=None, gpu=0):
