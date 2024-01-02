@@ -106,7 +106,7 @@ hyp = {
 #                DataLoader                 #
 #############################################
 
-## https://github.com/KellerJordan/cifar10-loader/blob/master/quick_cifar/loader.py
+# https://github.com/KellerJordan/cifar10-loader/blob/master/quick_cifar/loader.py
 import os
 from math import ceil
 import torch
@@ -339,7 +339,7 @@ class LookaheadState:
         for ema_param, net_param in zip(self.net_ema.values(), net.state_dict().values()):
             if net_param.dtype in (torch.half, torch.float):
                 ema_param.lerp_(net_param, 1-decay)
-                # copy the ema parameters back to the network, similarly to the Lookahead optimizer
+                # Copy the ema parameters back to the network, similarly to the Lookahead optimizer
                 net_param.copy_(ema_param)
 
 ############################################
@@ -418,13 +418,13 @@ def main(run, model_trainbias, model_freezebias):
     optimizer_freezebias = torch.optim.SGD(param_configs, momentum=momentum, nesterov=True)
     scheduler_freezebias = torch.optim.lr_scheduler.LambdaLR(optimizer_freezebias, lambda i: lr_schedule[i])
 
-    ## For accurately timing GPU code
+    # For accurately timing GPU code
     starter = torch.cuda.Event(enable_timing=True)
     ender = torch.cuda.Event(enable_timing=True)
 
     total_time_seconds = 0.0
 
-    ## Initialize the whitening layer using training images
+    # Initialize the whitening layer using training images
     starter.record()
     train_images = train_loader.normalize(train_loader.images[:5000])
     init_whitening_conv(model_trainbias._orig_mod[0], train_images)
@@ -434,7 +434,7 @@ def main(run, model_trainbias, model_freezebias):
 
     for epoch in range(math.ceil(epochs)):
 
-        ## After training the whiten bias for some epochs, swap in the compiled model with frozen bias
+        # After training the whiten bias for some epochs, swap in the compiled model with frozen bias
         if epoch == 0:
             model = model_trainbias
             optimizer = optimizer_trainbias
@@ -489,7 +489,7 @@ def main(run, model_trainbias, model_freezebias):
         #    Evaluation    #
         ####################
 
-        # save the accuracy and loss from the last training batch of the epoch
+        # Save the accuracy and loss from the last training batch of the epoch
         train_acc = (outputs.detach().argmax(1) == labels).float().mean().item()
         train_loss = loss.item() / batch_size
 
@@ -515,12 +515,12 @@ def main(run, model_trainbias, model_freezebias):
 
     with torch.no_grad():
 
-        ## Test-time augmentation strategy (for tta_level=2):
-        ## 1. Flip/mirror the image left-to-right (50% of the time).
-        ## 2. Translate the image by one pixel in any direction (50% of the time, i.e. both happen 25% of the time).
-        ##
-        ## This creates 8 inputs per image (left/right times the four directions),
-        ## which we evaluate and then weight according to the given probabilities.
+        # Test-time augmentation strategy (for tta_level=2):
+        # 1. Flip/mirror the image left-to-right (50% of the time).
+        # 2. Translate the image by one pixel in any direction (50% of the time, i.e. both happen 25% of the time).
+        #
+        # This creates 8 inputs per image (left/right times the four directions),
+        # which we evaluate and then weight according to the given probabilities.
 
         test_images = test_loader.normalize(test_loader.images)
         test_labels = test_loader.labels
@@ -566,11 +566,11 @@ if __name__ == "__main__":
     with open(sys.argv[0]) as f:
         code = f.read()
 
-    ## These compiled models are first warmed up, and then reinitialized every run. No learned
-    ## weights are reused between runs. To implement freezing of the whiten bias parameter
-    ## midway through training, we use two compiled models, one with trainable and the other
-    ## frozen whiten bias. This is faster than the naive approach of setting the bias
-    ## requires_grad=False midway through training on a single compiled model.
+    # These compiled models are first warmed up, and then reinitialized every run. No learned
+    # weights are reused between runs. To implement freezing of the whiten bias parameter
+    # midway through training, we use two compiled models, one with trainable and the other
+    # frozen whiten bias. This is faster than the naive approach of setting the bias
+    # requires_grad=False midway through training on a single compiled model.
     model_trainbias = make_net()
     model_freezebias = make_net()
     model_freezebias[0].bias.requires_grad = False
