@@ -1,8 +1,7 @@
 # airbench_cifar10.py
 #
 # This script is designed to reach 94% accuracy on the CIFAR-10 test-set in the shortest possible time
-# after first seeing the training set. It achieves that target in a runtime of 4.1 seconds on a single
-# NVIDIA A100.
+# after first seeing the training set. It has a runtime of 4.1 seconds on a single NVIDIA A100.
 #
 # This script descends from https://github.com/tysam-code/hlb-CIFAR10. We use the following methods:
 #
@@ -32,7 +31,7 @@
 # 6. We use GPU-accelerated dataloading, which is of course crucial. A generic fast CIFAR-10 dataloader
 #    can be found at https://github.com/KellerJordan/cifar10-loader.
 #
-# To confirm that the mean accuracy is above 94%, we ran a test of n=100 runs, which yielded an
+# To confirm that the mean accuracy is above 94%, we ran a test of n=1000 runs, which yielded an
 # average accuracy of 94.04% (p<0.0001 for the true mean being below 94%, via t-test).
 #
 # The 8-layer convnet we train has 2M parameters and uses 0.24 GFLOPs per forward pass. The entire
@@ -44,7 +43,7 @@
 # on CIFAR-10 uses ~30,000 TFLOPs and runs in minutes.
 #
 # 1. Page, David. "How to train your resnet." Myrtle, https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/. Sept 24 (2018).
-
+# 2. tysam-code. "CIFAR-10 hyperlightspeedbench." https://github.com/tysam-code/hlb-CIFAR10. Jan 01 (2024).
 
 #############################################
 #            Setup/Hyperparameters          #
