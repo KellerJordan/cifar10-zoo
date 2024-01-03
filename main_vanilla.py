@@ -25,7 +25,7 @@ hyp = {
         'momentum': 0.85,
         'weight_decay': 2e-3,   # weight decay per step (will not be scaled up by lr)
         'bias_scaler': 64.0,    # how much to scale up learning rate (but not weight decay) for BatchNorm biases
-        'label_smoothing': 0.2,
+        'cutoff_prob': 0.9,     # probability of correct label above which we zero out the loss
     },
     'aug': {
         'flip': True,
@@ -147,6 +147,22 @@ class PrepadCifarLoader:
 #############################################
 #            Network Components             #
 #############################################
+
+# This loss function has a continuous derivative which is zero after the predicted probability of correct class
+# exceeds cutoff_prob. This can be thought of as ignoring examples which are already easily predicted.
+class CutoffSmoothedCrossEntropy(nn.Module):
+    def __init__(self, cutoff_prob):
+        super().__init__()
+        self.cutoff_prob = torch.tensor(cutoff_prob)
+        p = self.cutoff_prob
+        self.base_loss = (1-p) * -(1-p).log() + p * -p.log()
+    def forward(self, logits, labels):
+        loss = F.cross_entropy(logits, labels, label_smoothing=2*(1-self.cutoff_prob),
+                               reduction='none') - self.base_loss
+        prob_labels = logits.softmax(1)[torch.arange(len(logits), device=logits.device), labels]
+        mask = (prob_labels > self.cutoff_prob)
+        loss[mask] = 0
+        return loss
 
 class Flatten(nn.Module):
     def forward(self, x):
@@ -298,8 +314,6 @@ def main(run):
     bias_scaler = hyp['opt']['bias_scaler']
 
     train_augs = dict(flip=hyp['aug']['flip'], translate=hyp['aug']['translate'])
-    loss_fn = nn.CrossEntropyLoss(label_smoothing=hyp['opt']['label_smoothing'], reduction='none')
-
     train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=batch_size, aug=train_augs)
     test_loader = PrepadCifarLoader('/tmp/cifar10', train=False, batch_size=2000)
 
@@ -309,7 +323,7 @@ def main(run):
                             [0.2, 1, 0]) # triangular learning rate schedule
 
     model = make_net()
-    lookahead_state = None
+    loss_fn = CutoffSmoothedCrossEntropy(hyp['opt']['cutoff_prob'])
     current_steps = 0
 
     params = [(k, p) for k, p in model.named_parameters() if p.requires_grad]
@@ -346,9 +360,9 @@ def main(run):
         for inputs, labels in train_loader:
 
             outputs = model(inputs)
-            loss = loss_fn(outputs, labels).sum()
+            loss = loss_fn(outputs, labels)
             optimizer.zero_grad(set_to_none=True)
-            loss.backward()
+            loss.sum().backward()
             optimizer.step()
             scheduler.step()
 
@@ -366,7 +380,7 @@ def main(run):
 
         # Save the accuracy and loss from the last training batch of the epoch
         train_acc = (outputs.detach().argmax(1) == labels).float().mean().item()
-        train_loss = loss.item() / batch_size
+        train_loss = loss.mean().item()
 
         model.eval()
         with torch.no_grad():
@@ -442,7 +456,7 @@ if __name__ == "__main__":
         code = f.read()
 
     print_columns(logging_columns_list, is_head=True)
-    accs = torch.tensor([main(run) for run in range(10)])
+    accs = torch.tensor([main(run) for run in range(25)])
     print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
     log = {'code': code, 'accs': accs}
