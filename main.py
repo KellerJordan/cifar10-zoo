@@ -532,7 +532,7 @@ def main(run, model_trainbias, model_freezebias):
         test_labels = test_loader.labels
 
         def infer_basic(inputs, net):
-            return net(inputs)
+            return net(inputs).clone() # using .clone() here averts some kind of bug with torch.compile
 
         def infer_mirror(inputs, net):
             return 0.5 * net(inputs) + 0.5 * net(inputs.flip(-1))
@@ -556,6 +556,7 @@ def main(run, model_trainbias, model_freezebias):
         elif hyp['net']['tta_level'] == 2:
             infer_fn = infer_mirror_translate
 
+        model.eval()
         logits_tta = torch.cat([infer_fn(inputs, model) for inputs in test_images.split(2000)])
         tta_val_acc = (logits_tta.argmax(1) == test_labels).float().mean().item()
 
