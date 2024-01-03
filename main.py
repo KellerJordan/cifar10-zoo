@@ -592,6 +592,6 @@ if __name__ == "__main__":
     log_dir = os.path.join('logs', str(uuid.uuid4()))
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(log_dir, 'log.pt')
-    print(log_path)
+    print(os.path.abspath(log_path))
     torch.save(log, os.path.join(log_dir, 'log.pt'))
 
