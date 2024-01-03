@@ -286,6 +286,7 @@ def make_net():
         nn.Linear(depths['block3'], 10, bias=False),
         Mul(hyp['net']['scaling_factor']),
     )
+    net[0].weight.requires_grad = False
     net = net.cuda()
     net = net.to(memory_format=torch.channels_last)
     net.half()
@@ -314,7 +315,6 @@ def init_whitening_conv(layer, train_set, eps=5e-4):
     eigenvalues, eigenvectors = get_whitening_parameters(patches)
     eigenvectors_scaled = eigenvectors / torch.sqrt(eigenvalues + eps)
     layer.weight.data[:] = torch.cat((eigenvectors_scaled, -eigenvectors_scaled))
-    layer.weight.requires_grad = False
 
 ############################################
 #                Lookahead                 #
