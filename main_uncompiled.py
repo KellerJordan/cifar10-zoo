@@ -497,7 +497,7 @@ def main(run):
         test_labels = test_loader.labels
 
         def infer_basic(inputs, net):
-            return net(inputs)
+            return net(inputs).clone() # using .clone() here averts some kind of bug with torch.compile
 
         def infer_mirror(inputs, net):
             return 0.5 * net(inputs) + 0.5 * net(inputs.flip(-1))

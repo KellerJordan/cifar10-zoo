@@ -1,3 +1,5 @@
+# this is a variant which does not use compilation, lookahead or progressive freezing
+
 #############################################
 #            Setup/Hyperparameters          #
 #############################################
@@ -18,7 +20,7 @@ torch.backends.cudnn.benchmark = True
 hyp = {
     'opt': {
         'batch_size': 1024,
-        'train_epochs': 9.8,
+        'train_epochs': 10.5,
         'lr': 1.0,              # learning rate per step
         'momentum': 0.85,
         'weight_decay': 2e-3,   # weight decay per step (will not be scaled up by lr)
@@ -36,7 +38,7 @@ hyp = {
         'batchnorm_momentum': 0.6,
         'base_depth': 64,
         'scaling_factor': 1/9,
-        'tta_level': 2,         # The level of test-time augmentation. 0=none, 1=mirror, 2=mirror+translate. More TTA takes longer but gives higher accuracy.
+        'tta_level': 2,         # the level of test-time augmentation: 0=none, 1=mirror, 2=mirror+translate
     },
 }
 
@@ -44,7 +46,7 @@ hyp = {
 #                DataLoader                 #
 #############################################
 
-## https://github.com/KellerJordan/cifar10-loader/blob/master/quick_cifar/loader.py
+# https://github.com/KellerJordan/cifar10-loader/blob/master/quick_cifar/loader.py
 import os
 from math import ceil
 import torch
@@ -82,8 +84,6 @@ def batch_crop(images, crop_size):
 
     return images_out
 
-## This is a pre-padded variant of quick_cifar.CifarLoader which moves the padding step of random translate
-## from __iter__ to __init__, so that it doesn't need to be repeated each epoch.
 class PrepadCifarLoader:
 
     def __init__(self, path, train=True, batch_size=500, aug=None, drop_last=None, shuffle=None, gpu=0):
@@ -100,44 +100,49 @@ class PrepadCifarLoader:
         self.images = (self.images.half() / 255).permute(0, 3, 1, 2).to(memory_format=torch.channels_last)
 
         self.normalize = T.Normalize(CIFAR_MEAN, CIFAR_STD)
-        self.denormalize = T.Normalize(-CIFAR_MEAN / CIFAR_STD, 1 / CIFAR_STD)
+        self.proc_images = {} # Saved results of image processing to be done on the first epoch
+        self.epoch = 0
 
         self.aug = aug or {}
         for k in self.aug.keys():
             assert k in ['flip', 'translate'], 'Unrecognized key: %s' % k
 
-        # Pre-flip images in order to do every-other epoch flipping scheme
-        self.images = self.normalize(self.images)
-        if self.aug.get('flip', False):
-            self.images = batch_flip_lr(self.images)
-        self.augment_calls = 0
-        # Pre-pad images to save time when doing random translation
-        pad = self.aug.get('translate', 0)
-        self.padded_images = F.pad(self.images, (pad,)*4, 'reflect') if pad > 0 else None
-
         self.batch_size = batch_size
         self.drop_last = train if drop_last is None else drop_last
         self.shuffle = train if shuffle is None else shuffle
-
-    def augment_prepad(self, images):
-        if self.aug.get('translate', 0) > 0:
-            images = batch_crop(images, self.images.shape[-2])
-        if self.aug.get('flip', False):
-            # Flip all images together every other epoch. This increases diversity relative to random flipping
-            if self.augment_calls % 2 == 1:
-                images = images.flip(-1)
-        self.augment_calls += 1
-        return images
 
     def __len__(self):
         return len(self.images)//self.batch_size if self.drop_last else ceil(len(self.images)/self.batch_size)
 
     def __iter__(self):
-        images = self.augment_prepad(self.padded_images if self.padded_images is not None else self.images)
+
+        if self.epoch == 0:
+            images = self.proc_images['norm'] = self.normalize(self.images)
+            # Pre-flip images in order to do every-other epoch flipping scheme
+            if self.aug.get('flip', False):
+                images = self.proc_images['flip'] = batch_flip_lr(images)
+            # Pre-pad images to save time when doing random translation
+            pad = self.aug.get('translate', 0)
+            if pad > 0:
+                self.proc_images['pad'] = F.pad(images, (pad,)*4, 'reflect')
+
+        if self.aug.get('translate', 0) > 0:
+            images = batch_crop(self.proc_images['pad'], self.images.shape[-2])
+        elif self.aug.get('flip', False):
+            images = self.proc_images['flip']
+        else:
+            images = self.proc_images['norm']
+        # Flip all images together every other epoch. This increases diversity relative to random flipping
+        if self.aug.get('flip', False):
+            if self.epoch % 2 == 1:
+                images = images.flip(-1)
+
+        self.epoch += 1
+
         indices = (torch.randperm if self.shuffle else torch.arange)(len(images), device=images.device)
         for i in range(len(self)):
             idxs = indices[i*self.batch_size:(i+1)*self.batch_size]
-            yield images[idxs], self.labels[idxs]
+            yield (images[idxs], self.labels[idxs])
 
 #############################################
 #            Network Components             #
@@ -205,7 +210,7 @@ def make_net():
     depths = {
         'block1': (1 * hyp['net']['base_depth']), # 64  w/ depth at base value
         'block2': (4 * hyp['net']['base_depth']), # 256 w/ depth at base value
-        'block3': (6 * hyp['net']['base_depth']), # 384 w/ depth at base value
+        'block3': (4 * hyp['net']['base_depth']), # 256 w/ depth at base value
     }
     whiten_conv_depth = 2 * 3 * hyp['net']['whitening']['kernel_size']**2
     net = nn.Sequential(
@@ -219,6 +224,7 @@ def make_net():
         nn.Linear(depths['block3'], 10, bias=False),
         Mul(hyp['net']['scaling_factor']),
     )
+    net[0].weight.requires_grad = False
     net = net.cuda()
     net = net.to(memory_format=torch.channels_last)
     net.half()
@@ -247,7 +253,6 @@ def init_whitening_conv(layer, train_set, eps=5e-4):
     eigenvalues, eigenvectors = get_whitening_parameters(patches)
     eigenvectors_scaled = eigenvectors / torch.sqrt(eigenvalues + eps)
     layer.weight.data[:] = torch.cat((eigenvectors_scaled, -eigenvectors_scaled))
-    layer.weight.requires_grad = False
 
 ############################################
 #                 Logging                  #
@@ -314,15 +319,15 @@ def main(run):
     optimizer = torch.optim.SGD(param_configs, momentum=momentum, nesterov=True)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule.__getitem__)
 
-    ## For accurately timing GPU code
+    # For accurately timing GPU code
     starter = torch.cuda.Event(enable_timing=True)
     ender = torch.cuda.Event(enable_timing=True)
 
     total_time_seconds = 0.0
 
-    ## Initialize the whitening layer using training images
+    # Initialize the whitening layer using training images
     starter.record()
-    train_images = train_loader.images[:5000]
+    train_images = train_loader.normalize(train_loader.images[:5000])
     init_whitening_conv(model[0], train_images)
     ender.record()
     torch.cuda.synchronize()
@@ -358,7 +363,7 @@ def main(run):
         #    Evaluation    #
         ####################
 
-        # save the accuracy and loss from the last training batch of the epoch
+        # Save the accuracy and loss from the last training batch of the epoch
         train_acc = (outputs.detach().argmax(1) == labels).float().mean().item()
         train_loss = loss.item() / batch_size
 
@@ -384,18 +389,18 @@ def main(run):
 
     with torch.no_grad():
 
-        ## Test-time augmentation strategy (for tta_level=2):
-        ## 1. Flip/mirror the image left-to-right (50% of the time).
-        ## 2. Translate the image by one pixel in any direction (50% of the time, i.e. both happen 25% of the time).
-        ##
-        ## This creates 8 inputs per image (left/right times the four directions),
-        ## which we evaluate and then weight according to the given probabilities.
+        # Test-time augmentation strategy (for tta_level=2):
+        # 1. Flip/mirror the image left-to-right (50% of the time).
+        # 2. Translate the image by one pixel in any direction (50% of the time, i.e. both happen 25% of the time).
+        #
+        # This creates 8 inputs per image (left/right times the four directions),
+        # which we evaluate and then weight according to the given probabilities.
 
-        test_images = test_loader.images
+        test_images = train_loader.normalize(test_loader.images)
         test_labels = test_loader.labels
 
         def infer_basic(inputs, net):
-            return net(inputs)
+            return net(inputs).clone() # using .clone() here averts some kind of bug with torch.compile
 
         def infer_mirror(inputs, net):
             return 0.5 * net(inputs) + 0.5 * net(inputs.flip(-1))
