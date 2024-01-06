@@ -75,14 +75,14 @@ torch.backends.cudnn.benchmark = True
 hyp = {
     'opt': {
         'batch_size': 1024,
-        'train_epochs': 10.1,
+        'train_epochs': 9.9,
         'lr': 1.5,              # learning rate per step
         'momentum': 0.85,
         'weight_decay': 2e-3,   # weight decay per step (will not be scaled up by lr)
         'bias_scaler': 64.0,    # how much to scale up learning rate (but not weight decay) for BatchNorm biases
         'label_smoothing': 0.2,
         'ema': {
-            'start_epochs': 2,
+            'start_epochs': 3,
             'decay_base': 0.95,
             'decay_pow': 3.,
             'every_n_steps': 5,
@@ -350,7 +350,7 @@ logging_columns_list = ['run   ', 'epoch', 'train_loss', 'val_loss', 'train_acc'
 def print_training_details(variables, is_final_entry):
     formatted = []
     for col in logging_columns_list:
-        var = variables.get(col, None)
+        var = variables.get(col.strip(), None)
         if type(var) in (int, str):
             res = str(var)
         elif type(var) is float:
@@ -493,7 +493,7 @@ def main(run):
         # This creates 8 inputs per image (left/right times the four directions),
         # which we evaluate and then weight according to the given probabilities.
 
-        test_images = train_loader.normalize(test_loader.images)
+        test_images = test_loader.normalize(test_loader.images)
         test_labels = test_loader.labels
 
         def infer_basic(inputs, net):
@@ -521,6 +521,7 @@ def main(run):
         elif hyp['net']['tta_level'] == 2:
             infer_fn = infer_mirror_translate
 
+        model.eval()
         logits_tta = torch.cat([infer_fn(inputs, model) for inputs in test_images.split(2000)])
         tta_val_acc = (logits_tta.argmax(1) == test_labels).float().mean().item()
 
