@@ -1,15 +1,10 @@
 import glob
 from tqdm import tqdm
-#import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
-
 import torchvision
 train_labels = torch.tensor(torchvision.datasets.CIFAR10('/tmp/cifar10', download=True, train=True).targets)
 test_labels = torch.tensor(torchvision.datasets.CIFAR10('/tmp/cifar10', download=True, train=False).targets)
-#from quick_cifar import CifarLoader
-#train_labels = CifarLoader('/tmp/cifar10', train=True).labels
-#test_labels = CifarLoader('/tmp/cifar10', train=False).labels
 
 ################################################################################################
 #    Load outputs and do variance analysis via theory from https://arxiv.org/abs/2304.01910    #
