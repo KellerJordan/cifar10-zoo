@@ -1,3 +1,8 @@
+# This script consumes the output of main_saveoutputs.py
+# It should be pointed to the output directory of that script, which by default is ./logs_saveoutputs/
+
+import os
+import sys
 import glob
 from tqdm import tqdm
 import torch
@@ -9,8 +14,11 @@ test_labels = torch.tensor(torchvision.datasets.CIFAR10('/tmp/cifar10', download
 ################################################################################################
 #    Load outputs and do variance analysis via theory from https://arxiv.org/abs/2304.01910    #
 ################################################################################################
-print('loading batches of outputs...')
-pp = glob.glob('/home/ubuntu/cifar10-zoo/logs_saveoutputs/*/*.pt')
+path = './logs_saveoutputs/'
+if len(sys.argv) >= 2:
+    path = sys.argv[1]
+print('loading batches of outputs from %s...' % path)
+pp = glob.glob(os.path.join(path, '*/*.pt'))
 objs = [torch.load(p, map_location='cpu') for p in tqdm(pp)]
 obj = {k: torch.cat([o[k] for o in objs]) for k in objs[0].keys() if 'logit' in k}
 del objs
