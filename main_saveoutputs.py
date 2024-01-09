@@ -1,7 +1,8 @@
 # airbench_cifar10.py
 #
 # This is a variant which saves the both the test-set logits (with and without TTA) and the training
-# set logits to disk. By default it executes 10,000 runs in batches of 500.
+# set logits to disk. By default it executes 10,000 runs in batches of 500, which takes around half
+# of an A100-day.
 
 #############################################
 #            Setup/Hyperparameters          #
