@@ -109,7 +109,7 @@ def train(train_loader):
     total_train_steps = len(train_loader) * epochs
     lr_schedule = np.interp(np.arange(1+total_train_steps),
                             [0, int(0.2 * total_train_steps), total_train_steps],
-                            [0.2, 1, 0]) # Linear warmup then annealing schedule
+                            [0.2, 1, 0]) # Triangular learning rate schedule
 
     model = make_net()
     optimizer = torch.optim.SGD(model.parameters(), lr=lr/batch_size, momentum=momentum, nesterov=True,
