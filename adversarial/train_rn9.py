@@ -17,9 +17,9 @@ from loader import CifarLoader
 
 hyp = {
     'opt': {
-        'epochs': 32,
+        'epochs': 50,
         'batch_size': 500,
-        'lr': 0.5,
+        'lr': 0.2,
         'momentum': 0.9,
         'wd': 5e-4,
     },
@@ -28,13 +28,16 @@ hyp = {
         'translate': 2,
         'cutout': 0,
     },
+    'net': {
+        'width': 1.0,
+    },
 }
 
 #############################################
 #            Network Components             #
 #############################################
 
-def make_net():
+def make_net(w=1.0):
 
     class Mul(nn.Module):
         def __init__(self, weight):
@@ -66,17 +69,20 @@ def make_net():
         )
 
     NUM_CLASSES = 10
+    w1 = int(w*64)
+    w2 = int(w*128)
+    w3 = int(w*256)
     model = nn.Sequential(
-        conv_bn(3, 64, kernel_size=3, stride=1, padding=1),
-        conv_bn(64, 128, kernel_size=5, stride=2, padding=2),
-        Residual(nn.Sequential(conv_bn(128, 128), conv_bn(128, 128))),
-        conv_bn(128, 256, kernel_size=3, stride=1, padding=1),
+        conv_bn(3, w1, kernel_size=3, stride=1, padding=1),
+        conv_bn(w1, w2, kernel_size=5, stride=2, padding=2),
+        Residual(nn.Sequential(conv_bn(w2, w2), conv_bn(w2, w2))),
+        conv_bn(w2, w3, kernel_size=3, stride=1, padding=1),
         nn.MaxPool2d(2),
-        Residual(nn.Sequential(conv_bn(256, 256), conv_bn(256, 256))),
-        conv_bn(256, 128, kernel_size=3, stride=1, padding=0),
+        Residual(nn.Sequential(conv_bn(w3, w3), conv_bn(w3, w3))),
+        conv_bn(w3, w2, kernel_size=3, stride=1, padding=0),
         nn.AdaptiveMaxPool2d((1, 1)),
         Flatten(),
-        nn.Linear(128, NUM_CLASSES, bias=False),
+        nn.Linear(w2, NUM_CLASSES, bias=False),
         Mul(0.2)
     )
     model = model.to(memory_format=torch.channels_last)
@@ -111,14 +117,15 @@ def train(train_loader):
                             [0, int(0.2 * total_train_steps), total_train_steps],
                             [0.2, 1, 0]) # Triangular learning rate schedule
 
-    model = make_net()
+    model = make_net(w=hyp['net']['width'])
     optimizer = torch.optim.SGD(model.parameters(), lr=lr/batch_size, momentum=momentum, nesterov=True,
                                 weight_decay=wd*batch_size)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule.__getitem__)
 
     train_loss, train_acc, test_acc = [], [], []
 
-    for epoch in tqdm(range(epochs)):
+    it = tqdm(range(epochs))
+    for epoch in it:
 
         model.train()
         for inputs, labels in train_loader:
@@ -132,9 +139,21 @@ def train(train_loader):
             scheduler.step()
 
         test_acc.append(evaluate(model, test_loader))
+        it.set_description('Acc=%.4f(test),%.4f(train)' % (test_acc[-1], train_acc[-1]))
 
     log = dict(train_loss=train_loss, train_acc=train_acc, test_acc=test_acc)
     return model, log 
+
+def save_data(loader, path):
+    if not os.path.exists(os.path.dirname(path)):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+    obj = {'images': loader.images, 'labels': loader.labels}
+    torch.save(obj, path)
+    
+def load_data(loader, path):
+    obj = torch.load(path)
+    loader.images = obj['images']
+    loader.labels = obj['labels']
 
 
 if __name__ == '__main__':
@@ -144,10 +163,16 @@ if __name__ == '__main__':
 
     train_augs = dict(flip=hyp['aug']['flip'], translate=hyp['aug']['translate'], cutout=hyp['aug']['cutout'])
     train_loader = CifarLoader('/tmp/cifar10', train=True, batch_size=hyp['opt']['batch_size'], aug=train_augs)
+    if len(sys.argv) >= 2:
+        data_path = sys.argv[1]
+        load_data(train_loader, data_path)
+    else:
+        data_path = None
 
     model, log = train(train_loader)
     log['hyp'] = hyp
     log['code'] = code
+    log['data'] = data_path
     print('Final acc:', log['test_acc'][-1])
 
     log_dir = os.path.join('logs', str(uuid.uuid4()))
