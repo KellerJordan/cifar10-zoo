@@ -26,10 +26,10 @@ print('total number of trained model outputs:', len(obj['logits']))
 print()
 print('we will measure all accuracy values (means and stds) in %, i.e. 100.0 is perfect accuracy')
 print()
-xx = (obj['logits_tta'].argmax(-1) == test_labels.cpu()).float().mean(1)
+xx = (obj['logits_tta'].argmax(-1) == test_labels).float().mean(1)
 print('mean accuracy (using tta):', xx.mean() * 100)
 print('mean accuracy (using tta, bottom of 95% ci):', (xx.mean() - 1.96 * xx.std() / len(xx)**0.5) * 100)
-xx = (obj['logits'].argmax(-1) == test_labels.cpu()).float().mean(1)
+xx = (obj['logits'].argmax(-1) == test_labels).float().mean(1)
 print('mean accuracy (without tta):', xx.mean() * 100)
 print('mean accuracy (without tta, bottom of 95% ci):', (xx.mean() - 1.96 * xx.std() / len(xx)**0.5) * 100)
 print()
@@ -38,7 +38,7 @@ logits = obj['logits']
 print()
 # Variance analysis
 pred = logits.argmax(-1)
-correct = (pred == test_labels.cpu()).float()
+correct = (pred == test_labels).float()
 pp = correct.mean(0)
 true_var = correct.sum(1).var() # this is variance of num-correct variable, so 10^10 times variance of accuracy
 pred_var = (pp * (1 - pp)).sum()
@@ -50,7 +50,7 @@ print('(see theorem 2 of https://arxiv.org/abs/2304.01910)')
 print('true instability should be very small for long stable trainings')
 print()
 ens_pred = logits.mean(0).argmax(1)
-ens_acc = (ens_pred == test_labels.cpu()).sum().item() / 100
+ens_acc = (ens_pred == test_labels).sum().item() / 100
 print('*** ensemble accuracy: %.2f ***  (via standard logit-averaging)' % ens_acc)
 print('\n')
 
