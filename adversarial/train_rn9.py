@@ -76,7 +76,7 @@ def make_net():
         conv_bn(256, 128, kernel_size=3, stride=1, padding=0),
         nn.AdaptiveMaxPool2d((1, 1)),
         Flatten(),
-        nn.Linear(int(w*128), NUM_CLASSES, bias=False),
+        nn.Linear(128, NUM_CLASSES, bias=False),
         Mul(0.2)
     )
     model = model.to(memory_format=torch.channels_last)
