@@ -76,14 +76,26 @@ import torch.nn.functional as F
 
 torch.backends.cudnn.benchmark = True
 
+# We express the main training hyperparameters (batch size, learning rate, momentum, and weight decay)
+# in decoupled form, so that each one can be tuned independently. This accomplishes the following:
+# * Assuming time-constant gradients, the average step size is decoupled from everything but the lr.
+# * The size of the weight decay update is decoupled from everything but the wd.
+# In constrast, normally when we increase the (Nesterov) momentum, this also scales up the step size
+# proportionally to 1 + 1 / (1 - momentum), meaning we cannot change momentum without having to re-tune
+# the learning rate. Similarly, normally when we increase the learning rate this also increases the size
+# of the weight decay, requiring a proportional decrease in the wd to maintain the same decay strength.
+#
+# The practical impact is that hyperparameter tuning is faster, since this parametrization allows each
+# one to be tuned independently. See https://myrtle.ai/learn/how-to-train-your-resnet-5-hyperparameters/.
+
 hyp = {
     'opt': {
-        'batch_size': 1024,
         'train_epochs': 9.9,
-        'lr': 1.5,              # learning rate per step
-        'momentum': 0.85,
-        'weight_decay': 2e-3,   # weight decay per step (will not be scaled up by lr)
-        'bias_scaler': 64.0,    # how much to scale up learning rate (but not weight decay) for BatchNorm biases
+        'batch_size': 1024,
+        'lr': 11.5,                 # units: learning rate per 1024 examples
+        'momentum': 0.85,           # units: decay per 1024 examples (e.g. batch_size=512 gives sqrt of this)
+        'weight_decay': 0.0153,     # units: weight decay per 1024 examples (decoupled from learning rate)
+        'bias_scaler': 64.0,        # scales up learning rate (but not weight decay) for BatchNorm biases
         'label_smoothing': 0.2,
         'ema': {
             'start_epochs': 3,
@@ -91,7 +103,7 @@ hyp = {
             'decay_pow': 3.,
             'every_n_steps': 5,
         },
-        'whiten_bias_epochs': 3 # how many epochs to train the whitening layer bias before freezing
+        'whiten_bias_epochs': 3,    # how many epochs to train the whitening layer bias before freezing
     },
     'aug': {
         'flip': True,
@@ -373,10 +385,15 @@ def main(run, model_trainbias, model_freezebias):
 
     batch_size = hyp['opt']['batch_size']
     epochs = hyp['opt']['train_epochs']
-    lr = hyp['opt']['lr'] / batch_size
     momentum = hyp['opt']['momentum']
-    wd = hyp['opt']['weight_decay']
-    bias_scaler = hyp['opt']['bias_scaler']
+    # Assuming  gradients are constant in time, for Nesterov momentum, the below ratio is how much
+    # larger the default steps will be than the underlying per-example gradients. We divide the
+    # learning rate by this ratio in order to ensure steps are the same scale as gradients, regardless
+    # of the choice of momentum.
+    kilostep_scale = 1024 * (1 + 1 / (1 - momentum))
+    lr = hyp['opt']['lr'] / kilostep_scale # denormalized learning rate to give to PyTorch SGD
+    wd = hyp['opt']['weight_decay'] * batch_size / kilostep_scale
+    lr_biases = lr * hyp['opt']['bias_scaler']
 
     train_augs = dict(flip=hyp['aug']['flip'], translate=hyp['aug']['translate'])
     loss_fn = nn.CrossEntropyLoss(label_smoothing=hyp['opt']['label_smoothing'], reduction='none')
@@ -399,15 +416,15 @@ def main(run, model_trainbias, model_freezebias):
 
     norm_biases = [p for k, p in model_trainbias.named_parameters() if 'norm' in k]
     other_params = [p for k, p in model_trainbias.named_parameters() if 'norm' not in k]
-    param_configs = [dict(params=norm_biases, lr=lr*bias_scaler, weight_decay=(wd / (lr*bias_scaler))),
-                     dict(params=other_params, lr=lr, weight_decay=(wd / lr))]
+    param_configs = [dict(params=norm_biases, lr=lr_biases, weight_decay=wd/lr_biases),
+                     dict(params=other_params, lr=lr, weight_decay=wd/lr)]
     optimizer_trainbias = torch.optim.SGD(param_configs, momentum=momentum, nesterov=True)
     scheduler_trainbias = torch.optim.lr_scheduler.LambdaLR(optimizer_trainbias, lambda i: lr_schedule[i])
 
     norm_biases = [p for k, p in model_freezebias.named_parameters() if 'norm' in k]
     other_params = [p for k, p in model_freezebias.named_parameters() if 'norm' not in k]
-    param_configs = [dict(params=norm_biases, lr=lr*bias_scaler, weight_decay=(wd / (lr*bias_scaler))),
-                     dict(params=other_params, lr=lr, weight_decay=(wd / lr))]
+    param_configs = [dict(params=norm_biases, lr=lr_biases, weight_decay=wd/lr_biases),
+                     dict(params=other_params, lr=lr, weight_decay=wd/lr)]
     optimizer_freezebias = torch.optim.SGD(param_configs, momentum=momentum, nesterov=True)
     scheduler_freezebias = torch.optim.lr_scheduler.LambdaLR(optimizer_freezebias, lambda i: lr_schedule[i])
 
