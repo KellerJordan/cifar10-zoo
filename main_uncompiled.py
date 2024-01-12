@@ -72,23 +72,20 @@ def batch_crop(images, crop_size):
     r = (images.size(-1) - crop_size)//2
     shifts = torch.randint(-r, r+1, size=(len(images), 2), device=images.device)
     images_out = torch.empty((len(images), 3, crop_size, crop_size), device=images.device, dtype=images.dtype)
-
+    # The two cropping methods in this if-else produce equivalent results, but the second is faster for r > 2.
     if r <= 2:
         for sy in range(-r, r+1):
             for sx in range(-r, r+1):
-                mask = (shifts[:, 0] == sy) & (shifts[:, 1] == sx)
+                mask = (shifts[:, 0] == sy) & (shifts[:, 1] == sx) 
                 images_out[mask] = images[mask, :, r+sy:r+sy+crop_size, r+sx:r+sx+crop_size]
     else:
         images_tmp = torch.empty((len(images), 3, crop_size, crop_size+2*r), device=images.device, dtype=images.dtype)
         for s in range(-r, r+1):
             mask = (shifts[:, 0] == s)
             images_tmp[mask] = images[mask, :, r+s:r+s+crop_size, :]
-
-        images_out = torch.empty((len(images), 3, crop_size, crop_size), device=images.device, dtype=images.dtype)
         for s in range(-r, r+1):
             mask = (shifts[:, 1] == s)
             images_out[mask] = images_tmp[mask, :, :, r+s:r+s+crop_size]
-
     return images_out
 
 class PrepadCifarLoader:
