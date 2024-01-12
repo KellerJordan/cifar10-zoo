@@ -17,7 +17,7 @@ from loader import CifarLoader
 
 hyp = {
     'opt': {
-        'epochs': 100,
+        'epochs': 200,
         'batch_size': 500,
         'lr': 0.2,
         'momentum': 0.9,
