@@ -1,5 +1,6 @@
 # This is a variant of airbench.py which does not use torch.compile, lookahead optimization, progressive
 # freezing, random translation test-time augmentation, or alternating flipping augmentation.
+# To maintain 94% accuracy, we have increased the epochs to 11 and the final block width to 512.
 
 #############################################
 #            Setup/Hyperparameters          #
@@ -21,7 +22,7 @@ torch.backends.cudnn.benchmark = True
 hyp = {
     'opt': {
         'batch_size': 1024,
-        'train_epochs': 14.0,
+        'train_epochs': 11.0,
         'lr': 1.0,              # learning rate per step
         'momentum': 0.85,
         'weight_decay': 2e-3,   # weight decay per step (will not be scaled up by lr)
@@ -199,7 +200,7 @@ def make_net():
     widths = {
         'block1': (1 * hyp['net']['base_width']), # 64  w/ width at base value
         'block2': (4 * hyp['net']['base_width']), # 256 w/ width at base value
-        'block3': (4 * hyp['net']['base_width']), # 256 w/ width at base value
+        'block3': (8 * hyp['net']['base_width']), # 512 w/ width at base value
     }
     whiten_conv_width = 2 * 3 * hyp['net']['whitening']['kernel_size']**2
     net = nn.Sequential(
