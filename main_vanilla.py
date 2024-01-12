@@ -160,16 +160,21 @@ class BatchNorm(nn.BatchNorm2d):
     def __init__(self, num_features, eps=1e-12, momentum=hyp['net']['batchnorm_momentum'],
                  weight=False, bias=True):
         super().__init__(num_features, eps=eps, momentum=1-momentum)
-        self.weight.data.fill_(1.0)
-        self.bias.data.fill_(0.0)
         self.weight.requires_grad = weight
         self.bias.requires_grad = bias
+        # Note that PyTorch already initializes the weights to one and bias to zero
 
 class Conv(nn.Conv2d):
     def __init__(self, in_channels, out_channels, kernel_size=3, padding='same', bias=False):
         super().__init__(in_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=bias)
-        if bias:
+
+    def reset_parameters(self):
+        super().reset_parameters()
+        if self.bias is not None:
             self.bias.data.zero_()
+        # Create an implicit residual via identity initialization
+        w = self.weight.data
+        torch.nn.init.dirac_(w[:w.size(1)])
 
 class ConvGroup(nn.Module):
     def __init__(self, channels_in, channels_out):
@@ -180,16 +185,8 @@ class ConvGroup(nn.Module):
         self.conv2 = Conv(channels_out, channels_out)
         self.norm2 = BatchNorm(channels_out)
         self.activ = nn.GELU()
-        self.init()
 
-    def init(self):
-        # Create an implicit residual via identity initialization
-        w1 = self.conv1.weight.data
-        w2 = self.conv2.weight.data
-        torch.nn.init.dirac_(w1[:w1.size(1)])
-        torch.nn.init.dirac_(w2)
-
-    def forward(self, x):
+    def forward(self, x): 
         x = self.conv1(x)
         x = self.pool(x)
         x = self.norm1(x)
