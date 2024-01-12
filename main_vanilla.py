@@ -36,7 +36,7 @@ hyp = {
             'kernel_size': 2,
         },
         'batchnorm_momentum': 0.6,
-        'base_depth': 64,
+        'base_width': 64,
         'scaling_factor': 1/9,
         'tta_level': 2,         # the level of test-time augmentation: 0=none, 1=mirror, 2=mirror+translate
     },
@@ -207,21 +207,21 @@ class ConvGroup(nn.Module):
 #############################################
 
 def make_net():
-    depths = {
-        'block1': (1 * hyp['net']['base_depth']), # 64  w/ depth at base value
-        'block2': (4 * hyp['net']['base_depth']), # 256 w/ depth at base value
-        'block3': (4 * hyp['net']['base_depth']), # 256 w/ depth at base value
+    widths = {
+        'block1': (1 * hyp['net']['base_width']), # 64  w/ width at base value
+        'block2': (4 * hyp['net']['base_width']), # 256 w/ width at base value
+        'block3': (4 * hyp['net']['base_width']), # 256 w/ width at base value
     }
-    whiten_conv_depth = 2 * 3 * hyp['net']['whitening']['kernel_size']**2
+    whiten_conv_width = 2 * 3 * hyp['net']['whitening']['kernel_size']**2
     net = nn.Sequential(
-        Conv(3, whiten_conv_depth, kernel_size=hyp['net']['whitening']['kernel_size'], padding=0, bias=True),
+        Conv(3, whiten_conv_width, kernel_size=hyp['net']['whitening']['kernel_size'], padding=0, bias=True),
         nn.GELU(),
-        ConvGroup(whiten_conv_depth, depths['block1']),
-        ConvGroup(depths['block1'],  depths['block2']),
-        ConvGroup(depths['block2'],  depths['block3']),
+        ConvGroup(whiten_conv_width, widths['block1']),
+        ConvGroup(widths['block1'],  widths['block2']),
+        ConvGroup(widths['block2'],  widths['block3']),
         nn.MaxPool2d(3),
         Flatten(),
-        nn.Linear(depths['block3'], 10, bias=False),
+        nn.Linear(widths['block3'], 10, bias=False),
         Mul(hyp['net']['scaling_factor']),
     )
     net[0].weight.requires_grad = False
