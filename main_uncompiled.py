@@ -33,9 +33,9 @@ hyp = {
     'opt': {
         'train_epochs': 9.9,
         'batch_size': 1024,
-        'lr': 11.5,                 # units: learning rate per 1024 examples
-        'momentum': 0.85,           # units: decay per 1024 examples (e.g. batch_size=512 gives sqrt of this)
-        'weight_decay': 0.0153,     # units: weight decay per 1024 examples (decoupled from learning rate)
+        'lr': 11.5,                 # learning rate per 1024 examples
+        'momentum': 0.85,           # decay per 1024 examples (e.g. batch_size=512 gives sqrt of this)
+        'weight_decay': 0.0153,     # weight decay per 1024 examples (decoupled from learning rate)
         'bias_scaler': 64.0,        # scales up learning rate (but not weight decay) for BatchNorm biases
         'label_smoothing': 0.2,
         'ema': {
