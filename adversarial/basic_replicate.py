@@ -1,6 +1,7 @@
 import os
 from tqdm import tqdm
 import torch
+import torch.nn.functional as F
 
 from loader import CifarLoader
 from model import make_net
@@ -10,7 +11,10 @@ loader = CifarLoader('cifar10', train=True, batch_size=500, shuffle=False, drop_
 
 def pgd(inputs, targets, model, r=2.0, step_size=0.1, steps=100, eps=1e-5):
     delta = torch.zeros_like(inputs, requires_grad=True)
-    for step in (range(steps)):
+    norm_r = 4 * r # radius converted into normalized pixel space
+    norm_step_size = 4 * step_size
+    
+    for step in range(steps):
         
         delta.grad = None
         output = model(inputs + delta)
@@ -22,12 +26,12 @@ def pgd(inputs, targets, model, r=2.0, step_size=0.1, steps=100, eps=1e-5):
         unit_grad = delta.grad / (grad_norm[:, None, None, None] + eps)
         
         # take step in unit-gradient direction with scheduled step size
-        delta.data -= step_size * unit_grad
+        delta.data -= norm_step_size * unit_grad
 
         # project to r-sphere
         delta_norm = delta.data.reshape(len(delta), -1).norm(dim=1)
-        mask = (delta_norm >= r)
-        delta.data[mask] = r * delta.data[mask] / (delta_norm[mask, None, None, None] + eps)
+        mask = (delta_norm >= norm_r)
+        delta.data[mask] = norm_r * delta.data[mask] / (delta_norm[mask, None, None, None] + eps)
         # project to pixel-space
         delta.data = loader.normalize(loader.denormalize(inputs + delta.data).clip(0, 1)) - inputs
 
@@ -64,18 +68,18 @@ if __name__ == '__main__':
     test_loader = CifarLoader('cifar10', train=False)
 
     print('Training clean model...')
-    model, log = train(train_loader)
+    model, _ = train(train_loader)
     print('Clean test accuracy: %.4f' % evaluate(model, test_loader))
 
     print('Generating D_rand...')
-    loader = gen_adv_dataset(model, dtype='drand', r=2.0, step_size=0.1)
+    loader = gen_adv_dataset(model, dtype='drand', r=0.5, step_size=0.1)
     print('Training on D_rand...')
-    model1 = train(loader)
+    model1, _ = train(loader)
     print('Clean test accuracy: %.4f' % evaluate(model1, test_loader))
 
     print('Generating D_det...')
-    loader = gen_adv_dataset(model, dtype='ddet', r=2.0, step_size=0.1)
+    loader = gen_adv_dataset(model, dtype='ddet', r=0.5, step_size=0.1)
     print('Training on D_det...')
-    model1 = train(loader)
+    model1, _ = train(loader)
     print('Clean test accuracy: %.4f' % evaluate(model1, test_loader))
 
