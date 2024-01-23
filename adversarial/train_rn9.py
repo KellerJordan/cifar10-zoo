@@ -152,8 +152,8 @@ def save_data(loader, path):
     
 def load_data(loader, path):
     obj = torch.load(path)
-    loader.images = obj['images']
-    loader.labels = obj['labels']
+    loader.images = obj['images'].half().cuda()
+    loader.labels = obj['labels'].cuda()
 
 
 if __name__ == '__main__':
