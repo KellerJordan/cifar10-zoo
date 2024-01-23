@@ -44,13 +44,11 @@ def evaluate(model, loader):
         outs = torch.cat([model(inputs) for inputs, _ in loader])
     return (outs.argmax(1) == loader.labels).float().mean().item()
 
-def train(train_loader):
+def train(train_loader, epochs=hyp['opt']['epochs'], lr=hyp['opt']['lr']):
 
     test_loader = CifarLoader('/tmp/cifar10', train=False, batch_size=1000)
     batch_size = train_loader.batch_size
 
-    epochs = hyp['opt']['epochs']
-    lr = hyp['opt']['lr']
     momentum = hyp['opt']['momentum']
     wd = hyp['opt']['wd']
 
