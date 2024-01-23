@@ -81,7 +81,7 @@ def train(train_loader):
             scheduler.step()
 
         test_acc.append(evaluate(model, test_loader))
-        it.set_description('Acc=%.4f(test),%.4f(train)' % (test_acc[-1], train_acc[-1]))
+        it.set_description('Acc=%.4f(train),%.4f(test)' % (train_acc[-1], test_acc[-1]))
 
     log = dict(train_loss=train_loss, train_acc=train_acc, test_acc=test_acc)
     return model, log 
