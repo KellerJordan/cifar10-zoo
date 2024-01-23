@@ -9,7 +9,7 @@ from train import train, evaluate
 
 loader = CifarLoader('cifar10', train=True, batch_size=500, shuffle=False, drop_last=False)
 
-def pgd(inputs, targets, model, r=2.0, step_size=0.1, steps=100, eps=1e-5):
+def pgd(inputs, targets, model, r=0.5, step_size=0.1, steps=100, eps=1e-5):
     delta = torch.zeros_like(inputs, requires_grad=True)
     norm_r = 4 * r # radius converted into normalized pixel space
     norm_step_size = 4 * step_size
@@ -73,13 +73,17 @@ if __name__ == '__main__':
 
     print('Generating D_rand...')
     loader = gen_adv_dataset(model, dtype='drand', r=0.5, step_size=0.1)
+    loader.save('datasets/replicate_drand.pt')
+    train_loader.load('datasets/replicate_drand.pt')
     print('Training on D_rand...')
-    model1, _ = train(loader)
+    model1, _ = train(train_loader)
     print('Clean test accuracy: %.4f' % evaluate(model1, test_loader))
 
     print('Generating D_det...')
     loader = gen_adv_dataset(model, dtype='ddet', r=0.5, step_size=0.1)
+    loader.save('datasets/replicate_ddet.pt')
+    train_loader.load('datasets/replicate_ddet.pt')
     print('Training on D_det...')
-    model1, _ = train(loader)
+    model1, _ = train(train_loader)
     print('Clean test accuracy: %.4f' % evaluate(model1, test_loader))
 
