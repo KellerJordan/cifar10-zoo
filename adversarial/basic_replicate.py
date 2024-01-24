@@ -1,3 +1,21 @@
+"""
+Training clean model...
+Acc=1.0000(train),0.9365(test): 100%|█████████████████████████████| 200/200 [03:35<00:00,  1.08s/it]
+Clean test accuracy: 0.9365
+Generating D_rand...
+100%|█████████████████████████████████████████████████████████████| 100/100 [01:51<00:00,  1.11s/it]
+Fooling rate: 0.9367
+Training on D_rand...
+Acc=1.0000(train),0.8390(test): 100%|█████████████████████████████| 200/200 [03:33<00:00,  1.07s/it]
+Clean test accuracy: 0.8390
+Generating D_det...
+100%|█████████████████████████████████████████████████████████████| 100/100 [01:51<00:00,  1.11s/it]
+Fooling rate: 0.9271
+Training on D_det...
+Acc=1.0000(train),0.1981(test): 100%|█████████████████████████████| 200/200 [03:32<00:00,  1.06s/it]
+Clean test accuracy: 0.1981
+"""
+
 import os
 from tqdm import tqdm
 import torch
@@ -63,6 +81,8 @@ def gen_adv_dataset(model, dtype='dother', **pgd_kwargs):
 
 
 if __name__ == '__main__':
+
+    os.makedirs('datasets', exist_ok=True)
 
     train_loader = CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4))
     test_loader = CifarLoader('cifar10', train=False)
