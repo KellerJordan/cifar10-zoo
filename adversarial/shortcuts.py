@@ -8,7 +8,6 @@ Clean test accuracy: 0.7951
 Generating leakage-only D_det...
 Training clean model to select subset of D_det...
 Acc=0.6000(train),0.6310(test): 100%|█████████████| 1/1 [00:01<00:00,  1.08s/it]
-Clean test accuracy: 0.6310
 Using delta=0 for n=1685 examples
 Using synthetic delta for n=48315 examples
 Training on leakage-only D_det...
@@ -56,7 +55,6 @@ if __name__ == '__main__':
     train_loader = CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4))
     print('Training clean model to select subset of D_det...')
     model, _ = train(train_loader, epochs=1)
-    print('Clean test accuracy: %.4f' % evaluate(model, test_loader))
     ddet_images = train_loader.images
     ddet_targets = (train_loader.labels + 1) % num_classes
     with torch.no_grad():
