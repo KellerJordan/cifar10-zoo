@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 
+# https://github.com/libffcv/ffcv/blob/77f11242cf9055b15fcaf9d2bb8e320de68dbfac/examples/cifar/train_cifar.py#L130
 def make_net(w=1.0):
 
     class Mul(nn.Module):
