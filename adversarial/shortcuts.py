@@ -1,3 +1,10 @@
+# This script generates a variant of D_rand and D_det with the following properties:
+# * Like the original D_rand and D_det, all examples have their target labels sampled either uniformly
+#   or deterministically, and are perturbed up to an L^2 radius of at most 0.5.
+# * But unlike the originals, the perturbations here do not arise as features, being strictly synthetic noise.
+# * Nevertheless, we still see generalization to clean test data, because of the way we choose which examples
+#   to perturb and which to leave alone.
+# Sample output:
 """
 Generating leakage-only D_rand...
 Using delta=0 for n=4980 examples

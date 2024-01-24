@@ -1,3 +1,6 @@
+# This script replicates the original D_rand and D_det experiments from Ilyas et al. (2019)
+# It gets much better accuracy on D_rand (likely because we do not force all perturbations to
+# reach the maximum radius), and worse on D_det (caused by using the smaller architecture).
 """
 Training clean model...
 Acc=1.0000(train),0.9365(test): 100%|█████████████████████████████| 200/200 [03:35<00:00,  1.08s/it]
