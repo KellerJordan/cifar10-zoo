@@ -9,12 +9,15 @@ if __name__ == '__main__':
 
     num_classes = 10
     test_loader = CifarLoader('cifar10', train=False)
+    adv_radius = 0.5
 
-    # Generate 10 fixed synthetic perturbations
+    # Generate 10 fixed synthetic perturbations via deconvolution
+    # - This was found to be the best shortcut in practice, much better than using Gaussian noise
     deconv = nn.ConvTranspose2d(1, 30, 3, stride=2, padding=0, bias=False)
-    deconv.weight.requires_grad = False
-    res = deconv(torch.ones(1, 16, 16))[:, 1:, 1:]
-    synthetic_noise = res.reshape(10, 3, 32, 32).cuda().half()
+    with torch.no_grad():
+        noise = deconv(torch.ones(1, 16, 16))[:, 1:, 1:].reshape(10, 3, 32, 32).cuda().half()
+    unit_noise = noise / noise.reshape(len(noise), -1).norm(dim=1)[:, None, None, None]
+    synthetic_noise = adv_radius * unit_noise
 
     # Leakage-only D_rand
     print('Generating leakage-only D_rand...')
