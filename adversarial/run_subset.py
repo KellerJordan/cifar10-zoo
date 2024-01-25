@@ -1,7 +1,23 @@
-# This script generates both D_other and a synthetic shortcut variant of it in the same manner as the one
-# generated for D_det.
+# This script trains on various subsets of D_other
 # Sample output:
 """
+Training clean model...
+Acc=1.0000(train),0.9398(test): 100%|███████████████████| 200/200 [03:35<00:00,  1.08s/it]
+Clean test accuracy: 0.9398
+Generating D_other...
+100%|███████████████████████████████████████████████████| 100/100 [01:51<00:00,  1.12s/it]
+Fooling rate: 0.9304
+Training on D_other...
+Acc=1.0000(train),0.6603(test): 100%|███████████████████| 200/200 [03:33<00:00,  1.07s/it]
+Clean test accuracy: 0.6603
+Training on bottom 60% most fooling examples...
+Contains 29929 examples
+Acc=1.0000(train),0.0296(test): 100%|███████████████████| 200/200 [02:11<00:00,  1.53it/s]
+Clean test accuracy: 0.0296
+Training on top 40% most fooling examples...
+Contains 19996 examples
+Acc=1.0000(train),0.7818(test): 100%|███████████████████| 200/200 [01:30<00:00,  2.21it/s]
+Clean test accuracy: 0.7818
 """
 
 import torch
