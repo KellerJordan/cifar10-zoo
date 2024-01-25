@@ -26,7 +26,6 @@ import torch
 from torch import nn
 
 from loader import CifarLoader
-from model import make_net
 from train import train, evaluate
 
 if __name__ == '__main__':
@@ -62,10 +61,9 @@ if __name__ == '__main__':
     train_loader = CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4))
     print('Training clean model to select subset of D_det...')
     model, _ = train(train_loader, epochs=1)
-    ddet_images = train_loader.images
     ddet_targets = (train_loader.labels + 1) % num_classes
     with torch.no_grad():
-        outputs = torch.cat([model(inputs) for inputs in train_loader.normalize(ddet_images).split(500)])
+        outputs = torch.cat([model(inputs) for inputs in train_loader.normalize(train_loader.images).split(500)])
         mask = (outputs.argmax(1) == ddet_targets)
     print('Using delta=0 for n=%d examples' % mask.sum())
     print('Using synthetic delta for n=%d examples' % (~mask).sum())
