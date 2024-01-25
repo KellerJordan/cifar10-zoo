@@ -127,7 +127,7 @@ def evaluate(model, loader):
 
 def train(train_loader, epochs=hyp['opt']['epochs'], lr=hyp['opt']['lr']):
 
-    test_loader = CifarLoader('/tmp/cifar10', train=False, batch_size=1000)
+    test_loader = CifarLoader('cifar10', train=False, batch_size=1000)
     batch_size = train_loader.batch_size
 
     momentum = hyp['opt']['momentum']
@@ -171,7 +171,7 @@ if __name__ == '__main__':
         code = f.read()
 
     train_augs = dict(flip=hyp['aug']['flip'], translate=hyp['aug']['translate'], cutout=hyp['aug']['cutout'])
-    train_loader = CifarLoader('/tmp/cifar10', train=True, batch_size=hyp['opt']['batch_size'], aug=train_augs)
+    train_loader = CifarLoader('cifar10', train=True, batch_size=hyp['opt']['batch_size'], aug=train_augs)
     if len(sys.argv) >= 2:
         data_path = sys.argv[1]
         train_loader.load(data_path)
