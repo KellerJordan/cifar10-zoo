@@ -2,11 +2,29 @@
 # generated for D_det.
 # Sample output:
 """
+Training clean model...
+Acc=1.0000(train),0.9432(test): 100%|███████████████████| 200/200 [03:35<00:00,  1.08s/it]
+Clean test accuracy: 0.9432
+Generating D_other...
+100%|███████████████████████████████████████████████████| 100/100 [01:51<00:00,  1.12s/it]
+Fooling rate: 0.9313
+Training on D_other...
+Acc=1.0000(train),0.6728(test): 100%|███████████████████| 200/200 [03:34<00:00,  1.07s/it]
+Clean test accuracy: 0.6728
+Generating leakage-only D_other...
+Training clean model to select subset of D_other...
+Acc=0.6240(train),0.6327(test): 100%|███████████████████████| 1/1 [00:01<00:00,  1.13s/it]
+Using delta=0 for n=2043 examples
+Using synthetic delta for n=47957 examples
+Training on leakage-only D_other...
+Acc=1.0000(train),0.4725(test): 100%|███████████████████| 200/200 [03:35<00:00,  1.08s/it]
+Clean test accuracy: 0.4725
 """
 
 import torch
 from torch import nn
 
+from adversarial import gen_adv_dataset
 from loader import CifarLoader
 from train import train, evaluate
 
@@ -17,6 +35,7 @@ if __name__ == '__main__':
     adv_radius = 0.5
 
     print('Training clean model...')
+    train_loader = CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4))
     model, _ = train(train_loader)
     print('Clean test accuracy: %.4f' % evaluate(model, test_loader))
 

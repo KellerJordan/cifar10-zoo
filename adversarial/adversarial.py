@@ -2,6 +2,7 @@ from tqdm import tqdm
 import torch
 import torch.nn.functional as F
 from loader import CifarLoader
+from train import evaluate
 
 loader0 = CifarLoader('cifar10', train=False, batch_size=500, shuffle=False, drop_last=False)
 def pgd(inputs, targets, model, r=0.5, step_size=0.1, steps=100, eps=1e-5):
