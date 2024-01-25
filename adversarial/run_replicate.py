@@ -25,7 +25,6 @@ import torch
 import torch.nn.functional as F
 
 from loader import CifarLoader
-from model import make_net
 from train import train, evaluate
 
 loader = CifarLoader('cifar10', train=True, batch_size=500, shuffle=False, drop_last=False)
