@@ -101,7 +101,7 @@ if __name__ == '__main__':
     log['hyp'] = hyp
     log['code'] = code
     log['data'] = data_path
-    print('Final acc:', log['test_acc'][-1])
+    print('Final acc: %.4f' % log['test_acc'][-1])
 
     log_dir = os.path.join('logs', str(uuid.uuid4()))
     os.makedirs(log_dir, exist_ok=True)
