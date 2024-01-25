@@ -9,6 +9,7 @@ from torch import nn
 
 from loader import CifarLoader
 from train import train, evaluate
+from adversarial import gen_adv_dataset
 
 def get_margins(model, loader):
     margins = []
