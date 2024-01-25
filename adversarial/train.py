@@ -44,7 +44,17 @@ def evaluate(model, loader):
         outs = torch.cat([model(inputs) for inputs, _ in loader])
     return (outs.argmax(1) == loader.labels).float().mean().item()
 
-def train(train_loader, epochs=hyp['opt']['epochs'], lr=hyp['opt']['lr']):
+def trainval_split(train_loader, frac=0.02):
+    val_loader = CifarLoader('cifar10', train=False)
+    mask = (torch.rand(len(train_loader.images)) < frac)
+    train_loader.images, val_loader.images = train_loader.images[~mask], train_loader.images[mask]
+    train_loader.labels, val_loader.labels = train_loader.labels[~mask], train_loader.labels[mask]
+    return train_loader, val_loader
+
+def train(train_loader, epochs=hyp['opt']['epochs'], lr=hyp['opt']['lr'], val_split=False):
+
+    if val_split:
+        train_loader, val_loader = trainval_split(train_loader)
 
     test_loader = CifarLoader('cifar10', train=False, batch_size=1000)
     batch_size = train_loader.batch_size
@@ -62,7 +72,7 @@ def train(train_loader, epochs=hyp['opt']['epochs'], lr=hyp['opt']['lr']):
                                 weight_decay=wd*batch_size)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule.__getitem__)
 
-    train_loss, train_acc, test_acc = [], [], []
+    train_loss, train_acc, val_acc, test_acc = [], [], [], []
 
     it = tqdm(range(epochs))
     for epoch in it:
@@ -78,10 +88,12 @@ def train(train_loader, epochs=hyp['opt']['epochs'], lr=hyp['opt']['lr']):
             optimizer.step()
             scheduler.step()
 
+        if val_split:
+            val_acc.append(evaluate(model, val_loader))
         test_acc.append(evaluate(model, test_loader))
-        it.set_description('Acc=%.4f(train),%.4f(test)' % (train_acc[-1], test_acc[-1]))
+        it.set_description('Acc=%.4f(train),%.4f(val),%.4f(test)' % (train_acc[-1], val_acc[-1], test_acc[-1]))
 
-    log = dict(train_loss=train_loss, train_acc=train_acc, test_acc=test_acc)
+    log = dict(train_loss=train_loss, train_acc=train_acc, val_acc=val_acc, test_acc=test_acc)
     return model, log 
 
 if __name__ == '__main__':
@@ -97,7 +109,7 @@ if __name__ == '__main__':
     else:
         data_path = None
 
-    model, log = train(train_loader)
+    model, log = train(train_loader, val_split=True)
     log['hyp'] = hyp
     log['code'] = code
     log['data'] = data_path
