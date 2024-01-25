@@ -6,19 +6,21 @@
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 from loader import CifarLoader
 from train import train, evaluate
 from adversarial import gen_adv_dataset
 
 def get_margins(model, loader):
-    margins = []
-    for inputs, labels in loader:
-        output = model(inputs)
-        mask = F.one_hot(labels).bool()
-        margin = output[mask] - output[~mask].reshape(len(output), -1).amax(1)
-        margins.append(margin)
-    margins = torch.cat(margins)
+    with torch.no_grad():
+        margins = []
+        for inputs, labels in loader:
+            output = model(inputs)
+            mask = F.one_hot(labels).bool()
+            margin = output[mask] - output[~mask].reshape(len(output), -1).amax(1)
+            margins.append(margin)
+        margins = torch.cat(margins)
     return margins
 
 if __name__ == '__main__':
