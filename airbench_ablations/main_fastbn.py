@@ -45,7 +45,7 @@ hyp = {
         'whitening': {
             'kernel_size': 2,
         },
-        'batchnorm_momentum': 0.9,
+        'batchnorm_momentum': 0.6,
         'base_width': 64,
         'scaling_factor': 1/9,
     },
