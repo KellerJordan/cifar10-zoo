@@ -2,14 +2,18 @@
 
 Each script adds a feature to the previous one.
 
-`main0_baseline.py`: Simply trains the architecture (using entirely standard initialization) with
-Nesterov SGD and data augmentation, evaluated with random flipping test-time augmentation.
-Reaches 94% mean accuracy in 35 epochs and 14.5 A100-seconds. [ 94.06 in n=25 ]
-
-This architecture is taken from hlb-cifar10, with the following changes. (1) We put BatchNorms in fp32
+The architecture is taken from hlb-cifar10, with the following changes. (1) We put BatchNorms in fp32
 because this results in faster epochs than putting them in fp16. (2) We replace the custom MaxPool at
 the end with nn.MaxPool2d(3). (3) We reduce the final block width from 512 to 256. (4) We add a
 learnable bias to the first conv layer.
+
+Script | Feature | Epochs | Time | Evidence
+- | - | - | - | -
+`main0_baseline.py` | Simply trains | 35 | 14.5 A100-seconds | 94.06 in n=25
+
+`main0_baseline.py`: Simply trains the architecture (using entirely standard initialization) with
+Nesterov SGD and data augmentation, evaluated with random flipping test-time augmentation.
+Reaches 94% mean accuracy in 35 epochs and 14.5 A100-seconds. [ 94.06 in n=25 ]
 
 `main1_whiten.py`: Adds whitening initialization of the first conv layer, and removes proceeding BatchNorm.
 -> 94% in 21 epochs / 8.6 seconds. [ 94.00 in n=200 ]
