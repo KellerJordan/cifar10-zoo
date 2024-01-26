@@ -18,7 +18,7 @@ Times are measured in seconds on a single NVIDIA A100.
 | `main4_freeze.py` | Freezes first conv layer bias after 3 epochs. | 13.5 | 5.2 | 94.03 in n=500 |
 | `main5_lookahead.py` | Adds lookahead / EMA-based optimization scheme from hlb-cifar10. | 12.0 | 4.6 | 94.03 in n=50 |
 | `main6_tta.py` | Evaluates with extra multi-crop TTA. | 10.8 | 4.3 | 94.02 in n=200 |
-| `main7_mirror.py` | Replaces random-flip data augmentation with semi-deterministic strategy. | 9.9 | 3.95 | 94.02 in n=700 |
+| `main7_mirror.py` | Replaces random-flip data augmentation with semi-deterministic alternatingst strategy. | 9.9 | 3.95 | 94.02 in n=700 |
 | `main8_compile.py` | Compiles model with `torch.compile`. This is the final version. | 9.9 | 3.5 | 94.02 in n=700 |
 
 ---
