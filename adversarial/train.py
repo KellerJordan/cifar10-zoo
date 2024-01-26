@@ -57,12 +57,13 @@ def trainval_split(train_loader, frac=0.02):
     train_loader.labels, val_loader.labels = train_loader.labels[~mask], train_loader.labels[mask]
     return train_loader, val_loader
 
-def train(train_loader, epochs=hyp['opt']['epochs'], lr=hyp['opt']['lr'], val_split=False):
+def train(train_loader, test_loader=None, epochs=hyp['opt']['epochs'], lr=hyp['opt']['lr'], val_split=False):
 
     if val_split:
         train_loader, val_loader = trainval_split(train_loader)
 
-    test_loader = CifarLoader('cifar10', train=False, batch_size=1000)
+    if test_loader is None:
+        test_loader = CifarLoader('cifar10', train=False, batch_size=1000)
     batch_size = train_loader.batch_size
 
     momentum = hyp['opt']['momentum']
