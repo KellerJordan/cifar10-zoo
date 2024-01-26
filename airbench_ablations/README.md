@@ -7,9 +7,11 @@ because this results in faster epochs than putting them in fp16. (2) We replace 
 the end with nn.MaxPool2d(3). (3) We reduce the final block width from 512 to 256. (4) We add a
 learnable bias to the first conv layer.
 
+Times are measured in seconds on a single NVIDIA A100.
+
 | Script | Feature | Epochs | Time | Evidence for >= 94% |
 | - | - | - | - | - |
-| `main0_baseline.py` | Trains the network with standard initialization, Nesterov SGD and data augmentation. Evaluates using random flipping TTA. | 35.0 | 14.5 A100-seconds | 94.06 in n=25 |
+| `main0_baseline.py` | Trains the network with standard initialization, Nesterov SGD and data augmentation. Evaluates using random flipping TTA. | 35.0 | 14.5 | 94.06 in n=25 |
 | `main1_whiten.py` | Adds whitening initialization for the first layer & removes proceeding BatchNorm. | 21.0 | 8.6 | 94.00 in n=200 |
 | `main2_dirac.py` | Uses dirac/identity initialization for all conv filters. | 18.0 | 7.3 | 94.01 in n=200 |
 | `main3_scalebias.py` | Adds scaling of learning rate for BatchNorm biases by 64x. | 13.5 | 5.5 | 94.01 in n=200 |
