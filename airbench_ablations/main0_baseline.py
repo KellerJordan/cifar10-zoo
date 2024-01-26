@@ -77,7 +77,7 @@ def batch_crop(images, crop_size):
     if r <= 2:
         for sy in range(-r, r+1):
             for sx in range(-r, r+1):
-                mask = (shifts[:, 0] == sy) & (shifts[:, 1] == sx) 
+                mask = (shifts[:, 0] == sy) & (shifts[:, 1] == sx)
                 images_out[mask] = images[mask, :, r+sy:r+sy+crop_size, r+sx:r+sx+crop_size]
     else:
         images_tmp = torch.empty((len(images), 3, crop_size, crop_size+2*r), device=images.device, dtype=images.dtype)
@@ -183,7 +183,7 @@ class ConvGroup(nn.Module):
         self.norm2 = BatchNorm(channels_out)
         self.activ = nn.GELU()
 
-    def forward(self, x): 
+    def forward(self, x):
         x = self.conv1(x)
         x = self.pool(x)
         x = self.norm1(x)
@@ -230,8 +230,8 @@ def make_net():
 def print_columns(columns_list, is_head=False, is_final_entry=False):
     print_string = ''
     for col in columns_list:
-        print_string += '|  %s  ' % col 
-    print_string += '|' 
+        print_string += '|  %s  ' % col
+    print_string += '|'
     if is_head:
         print('-'*len(print_string))
     print(print_string)
@@ -321,7 +321,7 @@ def main(run):
         ender.record()
         torch.cuda.synchronize()
         total_time_seconds += 1e-3 * starter.elapsed_time(ender)
-        
+
         ####################
         #    Evaluation    #
         ####################
