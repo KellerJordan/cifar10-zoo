@@ -440,9 +440,10 @@ def main(run):
 
         # Test-time augmentation strategy (for tta_level=2):
         # 1. Flip/mirror the image left-to-right (50% of the time).
-        # 2. Translate the image by one pixel in any direction (50% of the time, i.e. both happen 25% of the time).
+        # 2. Translate the image by one pixel either up-and-left or down-and-right (50% of the time,
+        #    i.e. both happen 25% of the time).
         #
-        # This creates 8 inputs per image (left/right times the four directions),
+        # This creates 6 views per image (left/right times the two translations and no-translation),
         # which we evaluate and then weight according to the given probabilities.
 
         test_images = test_loader.normalize(test_loader.images)

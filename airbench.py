@@ -45,11 +45,11 @@
 # of torch.compile, this script warms up in <10 seconds and takes 3.83 seconds per run.
 #
 # The 8-layer convnet we train has 2M parameters and uses 0.24 GFLOPs per forward pass. The entire
-# training run uses 366 TFLOPs, which could theoretically take 1.17 A100-seconds at perfect utilization.
+# training run uses 350 TFLOPs, which could theoretically take 1.12 A100-seconds at perfect utilization.
 #
 # For comparison, version 0.7.0 of https://github.com/tysam-code/hlb-CIFAR10 uses 587 TFLOPs and runs in
 # 6.2 seconds. The final training script from David Page's series "How to Train Your ResNet" (Page 2018)
-# uses 1,148 TFLOPs and runs in 15.1 seconds (on an A100). And the standard 200-epoch ResNet18 training
+# uses 1,148 TFLOPs and runs in 14.9 seconds (on an A100). And the standard 200-epoch ResNet18 training
 # on CIFAR-10 uses ~30,000 TFLOPs and runs in minutes.
 #
 # This script is descended from https://github.com/tysam-code/hlb-CIFAR10 [1], which itself is descended
@@ -526,9 +526,10 @@ def main(run, model_trainbias, model_freezebias):
 
         # Test-time augmentation strategy (for tta_level=2):
         # 1. Flip/mirror the image left-to-right (50% of the time).
-        # 2. Translate the image by one pixel in any direction (50% of the time, i.e. both happen 25% of the time).
+        # 2. Translate the image by one pixel either up-and-left or down-and-right (50% of the time,
+        #    i.e. both happen 25% of the time).
         #
-        # This creates 8 inputs per image (left/right times the four directions),
+        # This creates 6 views per image (left/right times the two translations and no-translation),
         # which we evaluate and then weight according to the given probabilities.
 
         test_images = test_loader.normalize(test_loader.images)
