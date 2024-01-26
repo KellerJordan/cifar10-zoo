@@ -1,14 +1,3 @@
-# This is a variant of airbench which does not use torch.compile, alternating flipping augmentation,
-# translation test-time augmentation, progressive freezing, or lookahead optimization. To maintain
-# 94% accuracy, the training epochs are increased to 13.
-#
-# On top of main_basic.py, this script additionally removes lr scaling for biases, identity init,
-# and whitening initialization.
-# To preserve accuracy the epochs are increased to 40.
-#
-# This script simply trains the architecture (with entirely standard init) for 40 epochs using
-# Nesterov SGD and data augmentation, evaluated with random flipping test-time augmentation.
-
 #############################################
 #            Setup/Hyperparameters          #
 #############################################
@@ -183,9 +172,6 @@ class Conv(nn.Conv2d):
         super().reset_parameters()
         if self.bias is not None:
             self.bias.data.zero_()
-        # Create an implicit residual via identity initialization
-        #w = self.weight.data
-        #torch.nn.init.dirac_(w[:w.size(1)])
 
 class ConvGroup(nn.Module):
     def __init__(self, channels_in, channels_out):

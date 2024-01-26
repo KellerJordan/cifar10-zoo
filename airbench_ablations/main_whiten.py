@@ -29,7 +29,7 @@ torch.backends.cudnn.benchmark = True
 
 hyp = {
     'opt': {
-        'train_epochs': 18.0,
+        'train_epochs': 22.0,
         'batch_size': 1024,
         'lr': 10.0,                 # learning rate per 1024 examples
         'momentum': 0.85,           # decay per 1024 examples (e.g. batch_size=512 gives sqrt of this)
@@ -172,9 +172,6 @@ class Conv(nn.Conv2d):
         super().reset_parameters()
         if self.bias is not None:
             self.bias.data.zero_()
-        # Create an implicit residual via identity initialization
-        #w = self.weight.data
-        #torch.nn.init.dirac_(w[:w.size(1)])
 
 class ConvGroup(nn.Module):
     def __init__(self, channels_in, channels_out):
@@ -219,9 +216,8 @@ def make_net():
         Mul(hyp['net']['scaling_factor']),
     )
     net[0].weight.requires_grad = False
-    net = net.cuda()
+    net = net.half().cuda()
     net = net.to(memory_format=torch.channels_last)
-    net.half()
     for mod in net.modules():
         if isinstance(mod, BatchNorm):
             mod.float()

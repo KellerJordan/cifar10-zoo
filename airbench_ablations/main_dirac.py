@@ -1,10 +1,3 @@
-# This is a variant of airbench which does not use torch.compile, alternating flipping augmentation,
-# translation test-time augmentation, progressive freezing, or lookahead optimization. To maintain
-# 94% accuracy, the training epochs are increased to 13.
-#
-# On top of main_basic.py, this script additionally removes lr scaling for biases. To preserve
-# accuracy the epochs are increased to 18.
-
 #############################################
 #            Setup/Hyperparameters          #
 #############################################
@@ -36,11 +29,12 @@ torch.backends.cudnn.benchmark = True
 
 hyp = {
     'opt': {
-        'train_epochs': 18.0,
+        'train_epochs': 13.0,
         'batch_size': 1024,
         'lr': 10.0,                 # learning rate per 1024 examples
         'momentum': 0.85,           # decay per 1024 examples (e.g. batch_size=512 gives sqrt of this)
         'weight_decay': 0.0153,     # weight decay per 1024 examples (decoupled from learning rate)
+        'bias_scaler': 64.0,        # scales up learning rate (but not weight decay) for BatchNorm biases
         'label_smoothing': 0.2,
     },
     'aug': {
@@ -51,7 +45,7 @@ hyp = {
         'whitening': {
             'kernel_size': 2,
         },
-        'batchnorm_momentum': 0.6,
+        'batchnorm_momentum': 0.9,
         'base_width': 64,
         'scaling_factor': 1/9,
     },
@@ -226,9 +220,8 @@ def make_net():
         Mul(hyp['net']['scaling_factor']),
     )
     net[0].weight.requires_grad = False
-    net = net.cuda()
+    net = net.half().cuda()
     net = net.to(memory_format=torch.channels_last)
-    net.half()
     for mod in net.modules():
         if isinstance(mod, BatchNorm):
             mod.float()
@@ -301,6 +294,7 @@ def main(run):
     kilostep_scale = 1024 * (1 + 1 / (1 - momentum))
     lr = hyp['opt']['lr'] / kilostep_scale # un-decoupled learning rate for PyTorch SGD
     wd = hyp['opt']['weight_decay'] * batch_size / kilostep_scale
+    lr_biases = lr * hyp['opt']['bias_scaler']
 
     loss_fn = nn.CrossEntropyLoss(label_smoothing=hyp['opt']['label_smoothing'], reduction='none')
 
@@ -320,7 +314,11 @@ def main(run):
     lookahead_state = None
     current_steps = 0
 
-    optimizer = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=wd/lr, momentum=momentum, nesterov=True)
+    norm_biases = [p for k, p in model.named_parameters() if 'norm' in k and p.requires_grad]
+    other_params = [p for k, p in model.named_parameters() if 'norm' not in k and p.requires_grad]
+    param_configs = [dict(params=norm_biases, lr=lr_biases, weight_decay=wd/lr_biases),
+                     dict(params=other_params, lr=lr, weight_decay=wd/lr)]
+    optimizer = torch.optim.SGD(param_configs, momentum=momentum, nesterov=True)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda i: lr_schedule[i])
 
     # For accurately timing GPU code
