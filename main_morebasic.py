@@ -2,8 +2,9 @@
 # translation test-time augmentation, progressive freezing, or lookahead optimization. To maintain
 # 94% accuracy, the training epochs are increased to 13.
 #
-# On top of main_basic.py, this script additionally removes lr scaling for biases. To preserve
-# accuracy the epochs are increased to 16.
+# On top of main_basic.py, this script additionally removes lr scaling for biases, identity init,
+# and whitening initialization.
+# To preserve accuracy the epochs are increased to 40.
 
 #############################################
 #            Setup/Hyperparameters          #
