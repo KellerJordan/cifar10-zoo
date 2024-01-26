@@ -1,6 +1,6 @@
 # A variant which doesn't use Ghost-BatchNorm; it slows training on A100s due to
 # precluding use of memory_format=torch.channels_last.
-# 11 second runtime
+# 11 second runtime, 94.16 in n=50
 
 import copy
 from itertools import count
