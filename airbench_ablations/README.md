@@ -8,7 +8,7 @@ The architecture is taken from [hlb-cifar10](https://github.com/tysam-code/hlb-C
 3. We reduce the final block width from 512 to 256.
 4. We add a learnable bias to the first conv layer.
 
-Times are measured in seconds on a single NVIDIA A100.
+Every time-to-94% is measured in seconds on a single NVIDIA A100.
 
 | Script | Feature | Epochs | Time | Evidence for >= 94% |
 | - | - | - | - | - |
