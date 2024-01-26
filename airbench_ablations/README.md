@@ -9,14 +9,8 @@ learnable bias to the first conv layer.
 
 | Script | Feature | Epochs | Time | Evidence |
 | - | - | - | - | - |
-| `main0_baseline.py` | Simply trains | 35 | 14.5 A100-seconds | 94.06 in n=25 |
-
-`main0_baseline.py`: Simply trains the architecture (using entirely standard initialization) with
-Nesterov SGD and data augmentation, evaluated with random flipping test-time augmentation.
-Reaches 94% mean accuracy in 35 epochs and 14.5 A100-seconds. [ 94.06 in n=25 ]
-
-`main1_whiten.py`: Adds whitening initialization of the first conv layer, and removes proceeding BatchNorm.
--> 94% in 21 epochs / 8.6 seconds. [ 94.00 in n=200 ]
+| `main0_baseline.py` | Trains the network with standard initialization, Nesterov SGD and data augmentation. Evaluates using random flipping TTA. | 35 | 14.5 A100-seconds | 94.06 in n=25 |
+| `main1_whiten.py` | Adds whitening initialization for the first layer & removes proceeding BatchNorm. | 21 | 8.6 | 94.00 in n=200 |
 
 `main2_dirac.py`: Uses dirac/identity initialization for all conv filters.
 -> 94% in 18 epochs / 7.3 seconds. [ 94.01 in n=200 ]
