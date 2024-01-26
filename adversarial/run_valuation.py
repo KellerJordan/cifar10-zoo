@@ -34,9 +34,9 @@ def get_margins(model, loader):
     with torch.no_grad():
         margins = []
         for inputs, labels in loader:
-            output = model(inputs)[:, :2]
-            output += model(inputs.flip(-1))[:, :2]
-            margin = output[:, 1] - output[:, 0]
+            output = (model(inputs) + model(inputs.flip(-1)))[:, :2]
+            mask = F.one_hot(labels, num_classes=2).bool()
+            margin = (output[mask] - output[~mask]).flatten()
             margins.append(margin)
         margins = torch.cat(margins)
     loader.shuffle = shuffle
@@ -57,13 +57,13 @@ if __name__ == '__main__':
     test_loader = convert_catdog(CifarLoader('cifar10', train=False))
 
     print('Training on full cat/dog set...')
-    #train(train_loader, test_loader, epochs=100)
+    #train(train_loader, test_loader)
 
     print('Training for two epochs to get network to use for splitting...')
     model, _ = train(train_loader, test_loader, epochs=8)
     loader = convert_catdog(CifarLoader('cifar10', train=True))
     margins = get_margins(model, loader)
-    q = margins.float().quantile(0.10)
+    q = margins.float().quantile(0.101)
     mask = (margins > q)
     
     if False:
