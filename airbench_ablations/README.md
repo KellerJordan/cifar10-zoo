@@ -23,15 +23,18 @@ learnable bias to the first conv layer.
 `main4_freeze.py`: Freezes first conv layer bias after 3 epochs.
 -> 94% in 13.5 epochs / 5.2 seconds. [ 94.03 in n=500 ]
 
-#`main_lookahead.py`: Adds the lookahead / EMA-based optimization scheme from hlb-cifar10.
-#-> [ 93.97% in n=25 ] -- on top of `main_freeze`
+`main_lookahead.py`: Adds lookahead / EMA-based optimization scheme from hlb-cifar10.
+-> 94% in 12.0 epochs / 4.6 seconds [ 94.03 in n=50 ]
 
-`main_tta`: (on top of `main_freeze`): Adds extra multi-crop TTA.
-n=25
--> 94.15% in 13.5 epochs / 5.3 seconds.
--> 94.10% in 12.0 epochs / 4.71 seconds.
--> 93.97% in 11.0 epochs / 4.4 seconds.
--> 93.98% in 11.5 epochs / 4.53 seconds.
+`main_tta`: Adds extra multi-crop TTA.
+-> increase to XX in 12.0 epochs / increased seconds
+-> 94% in 11.0 epochs / 4.36 seconds
+
+`main_fliplr`: Adds alterating strategy for left-right flip augmentation.
+-> 94% in 9.9 epochs / XX seconds
+
+`main_compile`: Adds usage of `torch.compile`.
+-> 94% in 9.9 epochs / 3.5 seconds [ 94.02 in n=700 ]
 
 
 ---
@@ -48,7 +51,4 @@ Note: lookahead only helps when combined with fast BatchNorm momentum, and vice 
 * Optimization (scalebias, lookahead, progressive freezing)
 * Evaluation (more tta)
 * Data distribution (alternating flip)
-
-## TODO
-* run `main_fastbn_lrsched.py` -- does fastbn + new lr sched do better than `main4_freeze`? doubt either one does alone
 

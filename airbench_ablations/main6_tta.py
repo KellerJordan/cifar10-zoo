@@ -31,7 +31,7 @@ torch.backends.cudnn.benchmark = True
 
 hyp = {
     'opt': {
-        'train_epochs': 9.9,
+        'train_epochs': 10.8,
         'batch_size': 1024,
         'lr': 11.5,                 # learning rate per 1024 examples
         'momentum': 0.85,           # decay per 1024 examples (e.g. batch_size=512 gives sqrt of this)
@@ -88,7 +88,7 @@ def batch_crop(images, crop_size):
     if r <= 2:
         for sy in range(-r, r+1):
             for sx in range(-r, r+1):
-                mask = (shifts[:, 0] == sy) & (shifts[:, 1] == sx) 
+                mask = (shifts[:, 0] == sy) & (shifts[:, 1] == sx)
                 images_out[mask] = images[mask, :, r+sy:r+sy+crop_size, r+sx:r+sx+crop_size]
     else:
         images_tmp = torch.empty((len(images), 3, crop_size, crop_size+2*r), device=images.device, dtype=images.dtype)
@@ -134,26 +134,18 @@ class PrepadCifarLoader:
 
         if self.epoch == 0:
             images = self.proc_images['norm'] = self.normalize(self.images)
-            # Pre-flip images in order to do every-other epoch flipping scheme
-            if self.aug.get('flip', False):
-                images = self.proc_images['flip'] = batch_flip_lr(images)
             # Pre-pad images to save time when doing random translation
             pad = self.aug.get('translate', 0)
             if pad > 0:
                 self.proc_images['pad'] = F.pad(images, (pad,)*4, 'reflect')
+        self.epoch += 1
 
         if self.aug.get('translate', 0) > 0:
             images = batch_crop(self.proc_images['pad'], self.images.shape[-2])
-        elif self.aug.get('flip', False):
-            images = self.proc_images['flip']
         else:
             images = self.proc_images['norm']
-        # Flip all images together every other epoch. This increases diversity relative to random flipping
         if self.aug.get('flip', False):
-            if self.epoch % 2 == 1:
-                images = images.flip(-1)
-
-        self.epoch += 1
+            images = batch_flip_lr(images)
 
         indices = (torch.randperm if self.shuffle else torch.arange)(len(images), device=images.device)
         for i in range(len(self)):
@@ -205,7 +197,7 @@ class ConvGroup(nn.Module):
         self.norm2 = BatchNorm(channels_out)
         self.activ = nn.GELU()
 
-    def forward(self, x): 
+    def forward(self, x):
         x = self.conv1(x)
         x = self.pool(x)
         x = self.norm1(x)
@@ -288,8 +280,8 @@ class LookaheadState:
 def print_columns(columns_list, is_head=False, is_final_entry=False):
     print_string = ''
     for col in columns_list:
-        print_string += '|  %s  ' % col 
-    print_string += '|' 
+        print_string += '|  %s  ' % col
+    print_string += '|'
     if is_head:
         print('-'*len(print_string))
     print(print_string)
@@ -390,7 +382,7 @@ def main(run):
 
             current_steps += 1
 
-            if epoch >= hyp['opt']['ema']['start_epochs'] and current_steps % hyp['opt']['ema']['every_n_steps'] == 0:          
+            if epoch >= hyp['opt']['ema']['start_epochs'] and current_steps % hyp['opt']['ema']['every_n_steps'] == 0:
                 if lookahead_state is None:
                     lookahead_state = LookaheadState(model)
                 else:
@@ -409,7 +401,7 @@ def main(run):
         ender.record()
         torch.cuda.synchronize()
         total_time_seconds += 1e-3 * starter.elapsed_time(ender)
-        
+
         ####################
         #    Evaluation    #
         ####################
@@ -467,7 +459,7 @@ def main(run):
             logits_translate_list = [infer_mirror(inputs_translate, net) for inputs_translate in inputs_translate_list]
             logits_translate = torch.stack(logits_translate_list).mean(0)
             return 0.5 * logits + 0.5 * logits_translate
-            
+
         if hyp['net']['tta_level'] == 0:
             infer_fn = infer_basic
         elif hyp['net']['tta_level'] == 1:
