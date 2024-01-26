@@ -1,15 +1,3 @@
-# dawnbench_dcpage.py
-# This script aims for exact equivalence to the final training procedure presented in David C. Page's post
-# https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/.
-#
-# It runs in 15 seconds on an NVIDIA A100, and yields a mean accuracy of 94.07% (across n=100 runs, in one test).
-#
-# It should be exactly equivalent to the final (10-epoch) training code given in
-# https://github.com/davidcpage/cifar10-fast/blob/master/bag_of_tricks.ipynb, with the one exception being that
-# we use the default Pytorch nesterov SGD, whereas the notebook uses a custom nesterov SGD which has a small bug.
-#
-# The print-logging and code layout are inspired by https://github.com/tysam-code/hlb-CIFAR10.
-
 import copy
 from itertools import count
 import numpy as np

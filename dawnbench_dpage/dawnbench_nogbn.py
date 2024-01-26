@@ -1,4 +1,6 @@
-# A variant which doesn't use Ghost-BatchNorm, because it is slow.
+# A variant which doesn't use Ghost-BatchNorm; it slows training on A100s due to
+# precluding use of memory_format=torch.channels_last.
+# 11 second runtime
 
 import copy
 from itertools import count
@@ -222,7 +224,7 @@ def print_training_details(variables, is_final_entry):
 
 def main(run):
 
-    epochs = 10
+    epochs = 11.0
     batch_size = 512
 
     lr = 1.0
