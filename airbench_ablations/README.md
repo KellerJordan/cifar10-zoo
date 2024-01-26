@@ -2,7 +2,7 @@
 
 Each script adds a feature to the previous one.
 
-The architecture is taken from [hlb-cifar10](https://github.com/tysam-code/hlb-CIFAR10), with the following changes.
+The architecture is the same as that in [hlb-cifar10](https://github.com/tysam-code/hlb-CIFAR10), with the following changes.
 1. We put BatchNorms in fp32 because this results in faster epochs than putting them in fp16.
 2. We replace the custom MaxPool at the end with nn.MaxPool2d(3).
 3. We reduce the final block width from 512 to 256.
