@@ -36,7 +36,7 @@ torch.backends.cudnn.benchmark = True
 
 hyp = {
     'opt': {
-        'train_epochs': 18.0,
+        'train_epochs': 40.0,
         'batch_size': 1024,
         'lr': 10.0,                 # learning rate per 1024 examples
         'momentum': 0.85,           # decay per 1024 examples (e.g. batch_size=512 gives sqrt of this)
@@ -51,7 +51,7 @@ hyp = {
         'whitening': {
             'kernel_size': 2,
         },
-        'batchnorm_momentum': 0.6,
+        'batchnorm_momentum': 0.9,
         'base_width': 64,
         'scaling_factor': 1/9,
     },
@@ -180,8 +180,8 @@ class Conv(nn.Conv2d):
         if self.bias is not None:
             self.bias.data.zero_()
         # Create an implicit residual via identity initialization
-        w = self.weight.data
-        torch.nn.init.dirac_(w[:w.size(1)])
+        #w = self.weight.data
+        #torch.nn.init.dirac_(w[:w.size(1)])
 
 class ConvGroup(nn.Module):
     def __init__(self, channels_in, channels_out):
@@ -215,7 +215,8 @@ def make_net():
     }
     whiten_conv_width = 2 * 3 * hyp['net']['whitening']['kernel_size']**2
     net = nn.Sequential(
-        Conv(3, whiten_conv_width, kernel_size=hyp['net']['whitening']['kernel_size'], padding=0, bias=True),
+        Conv(3, whiten_conv_width, kernel_size=hyp['net']['whitening']['kernel_size'], padding=0),
+        BatchNorm(whiten_conv_width),
         nn.GELU(),
         ConvGroup(whiten_conv_width, widths['block1']),
         ConvGroup(widths['block1'],  widths['block2']),
@@ -225,35 +226,12 @@ def make_net():
         nn.Linear(widths['block3'], 10, bias=False),
         Mul(hyp['net']['scaling_factor']),
     )
-    net[0].weight.requires_grad = False
-    net = net.cuda()
+    net = net.half().cuda()
     net = net.to(memory_format=torch.channels_last)
-    net.half()
     for mod in net.modules():
         if isinstance(mod, BatchNorm):
             mod.float()
     return net
-
-#############################################
-#       Whitening Conv Initialization       #
-#############################################
-
-def get_patches(x, patch_shape):
-    c, (h, w) = x.shape[1], patch_shape
-    return x.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1,c,h,w).float()
-
-def get_whitening_parameters(patches):
-    n,c,h,w = patches.shape
-    patches_flat = patches.view(n, -1)
-    est_patch_covariance = (patches_flat.T @ patches_flat) / n
-    eigenvalues, eigenvectors = torch.linalg.eigh(est_patch_covariance, UPLO='U')
-    return eigenvalues.flip(0).view(-1, 1, 1, 1), eigenvectors.T.reshape(c*h*w,c,h,w).flip(0)
-
-def init_whitening_conv(layer, train_set, eps=5e-4):
-    patches = get_patches(train_set, patch_shape=layer.weight.data.shape[2:])
-    eigenvalues, eigenvectors = get_whitening_parameters(patches)
-    eigenvectors_scaled = eigenvectors / torch.sqrt(eigenvalues + eps)
-    layer.weight.data[:] = torch.cat((eigenvectors_scaled, -eigenvectors_scaled))
 
 ############################################
 #                 Logging                  #
@@ -326,16 +304,7 @@ def main(run):
     # For accurately timing GPU code
     starter = torch.cuda.Event(enable_timing=True)
     ender = torch.cuda.Event(enable_timing=True)
-
     total_time_seconds = 0.0
-
-    # Initialize the whitening layer using training images
-    starter.record()
-    train_images = train_loader.normalize(train_loader.images[:5000])
-    init_whitening_conv(model[0], train_images)
-    ender.record()
-    torch.cuda.synchronize()
-    total_time_seconds += 1e-3 * starter.elapsed_time(ender)
 
     for epoch in range(math.ceil(epochs)):
 
