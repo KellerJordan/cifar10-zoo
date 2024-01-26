@@ -25,8 +25,8 @@ Times are measured in seconds on a single NVIDIA A100.
 Note: lookahead only helps when combined with fast BatchNorm momentum, and vice versa.
 
 ### Categories
-* Initialization (whiten, dirac)
-* Optimization (scalebias, lookahead, progressive freezing)
-* Evaluation (more tta)
-* Data distribution (alternating flip)
+* Initialization (`whiten`, `dirac`)
+* Optimization (`scalebias`, `freeze`, `lookahead`)
+* Evaluation (`tta`)
+* Data distribution (`mirror`)
 
