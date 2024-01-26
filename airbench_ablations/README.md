@@ -9,7 +9,7 @@ learnable bias to the first conv layer.
 
 Times are measured in seconds on a single NVIDIA A100.
 
-| Script | Feature | Epochs | Time | Evidence for >94% |
+| Script | Feature | Epochs | Time | Evidence for >= 94% |
 | - | - | - | - | - |
 | `main0_baseline.py` | Trains the network with standard initialization, Nesterov SGD and data augmentation. Evaluates using random-flip TTA. | 35.0 | 14.5 | 94.06 in n=25 |
 | `main1_whiten.py` | Adds whitening initialization for the first layer & removes proceeding BatchNorm. | 21.0 | 8.6 | 94.00 in n=200 |
