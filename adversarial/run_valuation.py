@@ -25,8 +25,8 @@ from torch import nn
 import torch.nn.functional as F
 
 from loader import CifarLoader
-#from train_rn18 import train, evaluate
-from train import train, evaluate
+from train_rn18 import train, evaluate
+#from train import train, evaluate
 
 def get_margins(model, loader):
     shuffle = loader.shuffle
@@ -35,8 +35,8 @@ def get_margins(model, loader):
         margins = []
         for inputs, labels in loader:
             output = model(inputs)[:, :2]
-            mask = F.one_hot(labels, num_classes=2).bool()
-            margin = output[mask] - output[~mask].reshape(len(output), -1).amax(1)
+            output += model(inputs.flip(-1))[:, :2]
+            margin = output[:, 1] - output[:, 0]
             margins.append(margin)
         margins = torch.cat(margins)
     loader.shuffle = shuffle
@@ -57,21 +57,22 @@ if __name__ == '__main__':
     test_loader = convert_catdog(CifarLoader('cifar10', train=False))
 
     print('Training on full cat/dog set...')
-    train(train_loader, test_loader, epochs=100)
+    #train(train_loader, test_loader, epochs=100)
 
     print('Training for two epochs to get network to use for splitting...')
     model, _ = train(train_loader, test_loader, epochs=8)
     loader = convert_catdog(CifarLoader('cifar10', train=True))
     margins = get_margins(model, loader)
-    q = margins.float().quantile(0.15)
-    mask = (margins < q)
+    q = margins.float().quantile(0.10)
+    mask = (margins > q)
     
-    print('Constructing subset A of correctly predicted examples...')
-    loader = convert_catdog(CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4)))
-    loader.images = loader.images[mask] 
-    loader.labels = loader.labels[mask]
-    print('Training on set A (%d examples)...' % mask.sum())
-    train(loader, test_loader)
+    if False:
+        print('Constructing subset A of correctly predicted examples...')
+        loader = convert_catdog(CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4)))
+        loader.images = loader.images[mask] 
+        loader.labels = loader.labels[mask]
+        print('Training on set A (%d examples)...' % mask.sum())
+        train(loader, test_loader)
 
     print('Constructing subset B of incorrectly predicted examples...')
     loader = convert_catdog(CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4)))
