@@ -46,7 +46,13 @@ def evaluate(model, loader):
 
 def trainval_split(train_loader, frac=0.02):
     val_loader = CifarLoader('cifar10', train=False)
-    mask = (torch.rand(len(train_loader.images)) < frac)
+    n = len(train_loader.images)
+    mask = (torch.rand(n) < frac)
+    #if n <= 50000:
+    #    mask = (torch.rand(n) < frac)
+    #else:
+    #    assert n % 50000 == 0
+    #    mask = (torch.rand(50000) < frac).repeat(n//50000)
     train_loader.images, val_loader.images = train_loader.images[~mask], train_loader.images[mask]
     train_loader.labels, val_loader.labels = train_loader.labels[~mask], train_loader.labels[mask]
     return train_loader, val_loader
@@ -72,7 +78,7 @@ def train(train_loader, epochs=hyp['opt']['epochs'], lr=hyp['opt']['lr'], val_sp
                                 weight_decay=wd*batch_size)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule.__getitem__)
 
-    train_loss, train_acc, val_acc, test_acc = [], [], [], []
+    train_loss, train_acc, val_acc, test_acc = [], [], [0], [0]
 
     it = tqdm(range(epochs))
     for epoch in it:
@@ -87,6 +93,7 @@ def train(train_loader, epochs=hyp['opt']['epochs'], lr=hyp['opt']['lr'], val_sp
             loss.sum().backward()
             optimizer.step()
             scheduler.step()
+            it.set_description('Acc=%.4f(train),%.4f(val),%.4f(test)' % (train_acc[-1], val_acc[-1], test_acc[-1]))
 
         if val_split:
             val_acc.append(evaluate(model, val_loader))
