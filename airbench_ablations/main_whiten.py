@@ -1,10 +1,3 @@
-# This is a variant of airbench which does not use torch.compile, alternating flipping augmentation,
-# translation test-time augmentation, progressive freezing, or lookahead optimization. To maintain
-# 94% accuracy, the training epochs are increased to 13.
-#
-# On top of main_basic.py, this script additionally removes lr scaling for biases. To preserve
-# accuracy the epochs are increased to 18.
-
 #############################################
 #            Setup/Hyperparameters          #
 #############################################
@@ -51,7 +44,7 @@ hyp = {
         'whitening': {
             'kernel_size': 2,
         },
-        'batchnorm_momentum': 0.6,
+        'batchnorm_momentum': 0.9,
         'base_width': 64,
         'scaling_factor': 1/9,
     },
