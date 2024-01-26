@@ -58,10 +58,18 @@ if __name__ == '__main__':
     model1, _ = train(train_loader)
     print('Clean test accuracy: %.4f' % evaluate(model1, test_loader))
 
-    # Construct various subsets of D_other for training / eval
+    # Get the target-class logit margins for D_other in order to construct various subsets
     loader = CifarLoader('cifar10', shuffle=False)
     loader.load('datasets/basic_dother.pt')
     margins = get_margins(model, loader)
+
+    print('Training on top 40% most fooling examples...')
+    mask = (margins > margins.float().quantile(0.6))
+    print('Contains %d examples' % mask.sum())
+    train_loader.images = loader.images[mask]
+    train_loader.labels = loader.labels[mask]
+    model1, _ = train(train_loader)
+    print('Clean test accuracy: %.4f' % evaluate(model1, test_loader))
 
     print('Training on bottom 60% most fooling examples...')
     mask = (margins < margins.float().quantile(0.6))
@@ -70,12 +78,13 @@ if __name__ == '__main__':
     train_loader.labels = loader.labels[mask]
     model1, _ = train(train_loader)
     print('Clean test accuracy: %.4f' % evaluate(model1, test_loader))
-        
-    print('Training on top 40% most fooling examples...')
-    mask = (margins > margins.float().quantile(0.6))
-    print('Contains %d examples' % mask.sum())
-    train_loader.images = loader.images[mask]
-    train_loader.labels = loader.labels[mask]
+
+    print('Training on bottom 60% most fooling examples, with perturbation scaled up by 2x...')
+    mult_r = 2.0
+    clean_images = CifarLoader('cifar10', train=True).images[mask]
+    adv_images = train_loader.images
+    adv_images = (mult_r * (adv_images - clean_images) + clean_images).clip(0, 1)
+    train_loader.images = adv_images
     model1, _ = train(train_loader)
     print('Clean test accuracy: %.4f' % evaluate(model1, test_loader))
 
