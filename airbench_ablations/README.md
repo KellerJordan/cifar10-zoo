@@ -7,9 +7,9 @@ because this results in faster epochs than putting them in fp16. (2) We replace 
 the end with nn.MaxPool2d(3). (3) We reduce the final block width from 512 to 256. (4) We add a
 learnable bias to the first conv layer.
 
-Script | Feature | Epochs | Time | Evidence
-- | - | - | - | -
-`main0_baseline.py` | Simply trains | 35 | 14.5 A100-seconds | 94.06 in n=25
+| Script | Feature | Epochs | Time | Evidence |
+| - | - | - | - | - |
+| `main0_baseline.py` | Simply trains | 35 | 14.5 A100-seconds | 94.06 in n=25 |
 
 `main0_baseline.py`: Simply trains the architecture (using entirely standard initialization) with
 Nesterov SGD and data augmentation, evaluated with random flipping test-time augmentation.
