@@ -25,7 +25,7 @@ from torch import nn
 import torch.nn.functional as F
 
 from loader import CifarLoader
-from train import train, evaluate
+from train_rn18 import train, evaluate
 from adversarial import gen_adv_dataset
 
 def get_margins(model, loader):
@@ -58,33 +58,24 @@ if __name__ == '__main__':
     model1, _ = train(train_loader)
     print('Clean test accuracy: %.4f' % evaluate(model1, test_loader))
 
-    # Get the target-class logit margins for D_other in order to construct various subsets
+    # Construct various subsets of D_other for training / eval
     loader = CifarLoader('cifar10', shuffle=False)
     loader.load('datasets/basic_dother.pt')
     margins = get_margins(model, loader)
 
-    print('Training on top 40% most fooling examples...')
-    mask = (margins > margins.float().quantile(0.6))
-    print('Contains %d examples' % mask.sum())
-    train_loader.images = loader.images[mask]
-    train_loader.labels = loader.labels[mask]
-    model1, _ = train(train_loader)
-    print('Clean test accuracy: %.4f' % evaluate(model1, test_loader))
-
     print('Training on bottom 60% most fooling examples...')
-    mask = (margins < margins.float().quantile(0.6))
+    mask = (margins < margins.float().quantile(0.7))
     print('Contains %d examples' % mask.sum())
     train_loader.images = loader.images[mask]
     train_loader.labels = loader.labels[mask]
     model1, _ = train(train_loader)
     print('Clean test accuracy: %.4f' % evaluate(model1, test_loader))
-
-    print('Training on bottom 60% most fooling examples, with perturbation scaled up by 2x...')
-    mult_r = 2.0
-    clean_images = CifarLoader('cifar10', train=True).images[mask]
-    adv_images = train_loader.images
-    adv_images = (mult_r * (adv_images - clean_images) + clean_images).clip(0, 1)
-    train_loader.images = adv_images
+        
+    print('Training on top 40% most fooling examples...')
+    mask = (margins > margins.float().quantile(0.7))
+    print('Contains %d examples' % mask.sum())
+    train_loader.images = loader.images[mask]
+    train_loader.labels = loader.labels[mask]
     model1, _ = train(train_loader)
     print('Clean test accuracy: %.4f' % evaluate(model1, test_loader))
 
