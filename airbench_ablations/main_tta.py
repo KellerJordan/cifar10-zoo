@@ -29,7 +29,7 @@ torch.backends.cudnn.benchmark = True
 
 hyp = {
     'opt': {
-        'train_epochs': 13.5,
+        'train_epochs': 12.0,
         'batch_size': 1024,
         'lr': 10.0,                 # learning rate per 1024 examples
         'momentum': 0.85,           # decay per 1024 examples (e.g. batch_size=512 gives sqrt of this)
@@ -46,9 +46,10 @@ hyp = {
         'whitening': {
             'kernel_size': 2,
         },
-        'batchnorm_momentum': 0.6,
+        'batchnorm_momentum': 0.9,
         'base_width': 64,
         'scaling_factor': 1/9,
+        'tta_level': 2,
     },
 }
 
@@ -393,11 +394,45 @@ def main(run):
     starter.record()
 
     with torch.no_grad():
-        # Test-time augmentation strategy: Flip/mirror the image left-to-right (50% of the time).
-        test_images = train_loader.normalize(test_loader.images)
-        logits_tta = torch.cat([0.5 * model(inputs) + 0.5 * model(inputs.flip(-1))
-                                for inputs in test_images.split(2000)])
-        tta_val_acc = (logits_tta.argmax(1) == test_loader.labels).float().mean().item()
+
+        # Test-time augmentation strategy (for tta_level=2):
+        # 1. Flip/mirror the image left-to-right (50% of the time).
+        # 2. Translate the image by one pixel in any direction (50% of the time, i.e. both happen 25% of the time).
+        #
+        # This creates 8 inputs per image (left/right times the four directions),
+        # which we evaluate and then weight according to the given probabilities.
+
+        test_images = test_loader.normalize(test_loader.images)
+        test_labels = test_loader.labels
+
+        def infer_basic(inputs, net):
+            return net(inputs).clone() # using .clone() here averts some kind of bug with torch.compile
+
+        def infer_mirror(inputs, net):
+            return 0.5 * net(inputs) + 0.5 * net(inputs.flip(-1))
+
+        def infer_mirror_translate(inputs, net):
+            logits = infer_mirror(inputs, net)
+            pad = 1
+            padded_inputs = F.pad(inputs, (pad,)*4, 'reflect')
+            inputs_translate_list = [
+                padded_inputs[:, :, 0:32, 0:32],
+                padded_inputs[:, :, 2:34, 2:34],
+            ]
+            logits_translate_list = [infer_mirror(inputs_translate, net) for inputs_translate in inputs_translate_list]
+            logits_translate = torch.stack(logits_translate_list).mean(0)
+            return 0.5 * logits + 0.5 * logits_translate
+
+        if hyp['net']['tta_level'] == 0:
+            infer_fn = infer_basic
+        elif hyp['net']['tta_level'] == 1:
+            infer_fn = infer_mirror
+        elif hyp['net']['tta_level'] == 2:
+            infer_fn = infer_mirror_translate
+
+        model.eval()
+        logits_tta = torch.cat([infer_fn(inputs, model) for inputs in test_images.split(2000)])
+        tta_val_acc = (logits_tta.argmax(1) == test_labels).float().mean().item()
 
     ender.record()
     torch.cuda.synchronize()
