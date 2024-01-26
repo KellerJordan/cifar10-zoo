@@ -73,18 +73,6 @@ class CifarLoader:
         self.drop_last = train if drop_last is None else drop_last
         self.shuffle = train if shuffle is None else shuffle
 
-    def save(self, path):
-        if not os.path.exists(os.path.dirname(path)):
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-        obj = {'images': self.images, 'labels': self.labels}
-        torch.save(obj, path)
-
-    def load(self, path):
-        obj = torch.load(path)
-        self.images = obj['images'].half().cuda()
-        self.labels = obj['labels'].cuda()
-        return self
-
     def augment(self, images):
         if self.aug.get('flip', False):
             images = batch_flip_lr(images)
