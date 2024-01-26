@@ -11,13 +11,13 @@ because this results in faster epochs than putting them in fp16. (2) We replace 
 the end with nn.MaxPool2d(3). (3) We reduce the final block width from 512 to 256.
 
 `main_whiten.py`: Adds whitening initialization of the first conv layer, and removes proceeding BatchNorm.
-94% in 22 epochs / 9.0 A100-seconds. [ 94.07 in n=25 ]
+94% in 21 epochs / 8.6 A100-seconds. [ 94.00 in n=200 ]
+
+`main_dirac.py`: Uses dirac/identity initialization for all conv filters.
+94% in 18 epochs / 7.3 seconds. [ 94.01 in n=200 ]
 
 `main_scalebias.py`: Adds scaling of learning rate for BatchNorm biases by 64x.
-94% in 17 epochs / 6.9 A100-seconds. [ 94.07 in n=25 ]
-
-`main_dirac.py`: Adds dirac/identity initialization to conv filters.
-94% in 14 epochs / 5.7 seconds. [ 94.07 in n=25 ]
+94% in 13.5 epochs / 5.5 seconds. [ 94.01 in n=200 ]
 
 `main_lookahead.py`: Adds the lookahead / EMA based optimization scheme from hlb-cifar10.
 
@@ -31,3 +31,11 @@ epochs or accuracy, but increases speed to XX A100-seconds.
 * `main_uncompiled.py`: same as full airbench but without `torch.compile`
 * `main_basic.py`: 
 
+### Categories
+* Initialization (whiten, dirac)
+* Optimization (scalebias, lookahead, progressive freezing)
+* Evaluation (more tta)
+* Data distribution (alternating flip)
+
+`main_scalebias.py`: Adds scaling of learning rate for BatchNorm biases by 64x.
+94% in 17 epochs / 6.9 A100-seconds94.01 in n=200 . [ 94.07 in n=25 ]
