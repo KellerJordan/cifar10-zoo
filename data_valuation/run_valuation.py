@@ -1,23 +1,11 @@
-# This script trains on various subsets of D_other
 # Sample output:
 """
-Training clean model...
-Acc=1.0000(train),0.9398(test): 100%|███████████████████| 200/200 [03:35<00:00,  1.08s/it]
-Clean test accuracy: 0.9398
-Generating D_other...
-100%|███████████████████████████████████████████████████| 100/100 [01:51<00:00,  1.12s/it]
-Fooling rate: 0.9304
-Training on D_other...
-Acc=1.0000(train),0.6603(test): 100%|███████████████████| 200/200 [03:33<00:00,  1.07s/it]
-Clean test accuracy: 0.6603
-Training on bottom 60% most fooling examples...
-Contains 29929 examples
-Acc=1.0000(train),0.0296(test): 100%|███████████████████| 200/200 [02:11<00:00,  1.53it/s]
-Clean test accuracy: 0.0296
-Training on top 40% most fooling examples...
-Contains 19996 examples
-Acc=1.0000(train),0.7818(test): 100%|███████████████████| 200/200 [01:30<00:00,  2.21it/s]
-Clean test accuracy: 0.7818
+Training on full cat/dog set...
+Training weak classifier to use for splitting...
+Acc=0.8240(train),0.7915(test): 100%|███████████████████████| 8/8 [00:05<00:00,  1.36it/s]
+Constructing subset B of incorrectly predicted examples...
+Training on set B (1017 examples)...
+Acc=1.0000(train),0.2700(test): 100%|███████████████████| 200/200 [00:13<00:00, 15.18it/s]
 """
 
 import torch
@@ -26,7 +14,6 @@ import torch.nn.functional as F
 
 from loader import CifarLoader
 from train_rn18 import train, evaluate
-#from train import train, evaluate
 
 def get_margins(model, loader):
     shuffle = loader.shuffle
@@ -57,22 +44,21 @@ if __name__ == '__main__':
     test_loader = convert_catdog(CifarLoader('cifar10', train=False))
 
     print('Training on full cat/dog set...')
-    #train(train_loader, test_loader)
+    train(train_loader, test_loader)
 
-    print('Training for two epochs to get network to use for splitting...')
+    print('Training weak classifier to use for splitting...')
     model, _ = train(train_loader, test_loader, epochs=8)
     loader = convert_catdog(CifarLoader('cifar10', train=True))
     margins = get_margins(model, loader)
     q = margins.float().quantile(0.101)
     mask = (margins > q)
     
-    if False:
-        print('Constructing subset A of correctly predicted examples...')
-        loader = convert_catdog(CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4)))
-        loader.images = loader.images[mask] 
-        loader.labels = loader.labels[mask]
-        print('Training on set A (%d examples)...' % mask.sum())
-        train(loader, test_loader)
+    print('Constructing subset A of correctly predicted examples...')
+    loader = convert_catdog(CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4)))
+    loader.images = loader.images[mask] 
+    loader.labels = loader.labels[mask]
+    print('Training on set A (%d examples)...' % mask.sum())
+    train(loader, test_loader)
 
     print('Constructing subset B of incorrectly predicted examples...')
     loader = convert_catdog(CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4)))
