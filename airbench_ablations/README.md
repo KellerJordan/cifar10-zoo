@@ -23,28 +23,22 @@ learnable bias to the first conv layer.
 `main4_freeze.py`: Freezes first conv layer bias after 3 epochs.
 -> 94% in 13.5 epochs / 5.2 seconds. [ 94.03 in n=500 ]
 
-`main_lookahead.py`: Adds lookahead / EMA-based optimization scheme from hlb-cifar10.
+`main5_lookahead.py`: Adds lookahead / EMA-based optimization scheme from hlb-cifar10.
 -> 94% in 12.0 epochs / 4.6 seconds [ 94.03 in n=50 ]
 
-`main_tta`: Adds extra multi-crop TTA.
+`main6_tta`: Adds extra multi-crop TTA.
 -> increase to XX in 12.0 epochs / increased seconds
 -> 94% in 10.8 epochs / 4.3 seconds [ 94.01 in n=25 ]
 
-`main_fliplr`: Adds alterating strategy for left-right flip augmentation.
+`main7_fliplr`: Adds alterating strategy for left-right flip augmentation.
 -> 94% in 9.9 epochs / 3.95 seconds [ 94.02 in n=700 ]
 
-`main_compile`: Adds usage of `torch.compile`.
+`main8_compile`: Adds usage of `torch.compile`. This is the final version.
 -> 94% in 9.9 epochs / 3.5 seconds [ 94.02 in n=700 ]
 
 
 ---
 Note: lookahead only helps when combined with fast BatchNorm momentum, and vice versa.
-
-
-
-* alternating flip
-
-* `main_uncompiled.py`: same as full airbench but without `torch.compile`
 
 ### Categories
 * Initialization (whiten, dirac)
