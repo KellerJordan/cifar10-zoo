@@ -353,8 +353,8 @@ class LookaheadState:
 def print_columns(columns_list, is_head=False, is_final_entry=False):
     print_string = ''
     for col in columns_list:
-        print_string += '|  %s  ' % col 
-    print_string += '|' 
+        print_string += '|  %s  ' % col
+    print_string += '|'
     if is_head:
         print('-'*len(print_string))
     print(print_string)
@@ -455,7 +455,7 @@ def main(run, model_trainbias, model_freezebias):
             model.load_state_dict(model_trainbias.state_dict())
             optimizer.load_state_dict(optimizer_trainbias.state_dict())
             scheduler.load_state_dict(scheduler_trainbias.state_dict())
-        
+
         ####################
         #     Training     #
         ####################
@@ -474,7 +474,7 @@ def main(run, model_trainbias, model_freezebias):
 
             current_steps += 1
 
-            if epoch >= hyp['opt']['ema']['start_epochs'] and current_steps % hyp['opt']['ema']['every_n_steps'] == 0:          
+            if epoch >= hyp['opt']['ema']['start_epochs'] and current_steps % hyp['opt']['ema']['every_n_steps'] == 0:
                 if lookahead_state is None:
                     lookahead_state = LookaheadState(model)
                 else:
@@ -493,7 +493,7 @@ def main(run, model_trainbias, model_freezebias):
         ender.record()
         torch.cuda.synchronize()
         total_time_seconds += 1e-3 * starter.elapsed_time(ender)
-        
+
         ####################
         #    Evaluation    #
         ####################
@@ -551,7 +551,7 @@ def main(run, model_trainbias, model_freezebias):
             logits_translate_list = [infer_mirror(inputs_translate, net) for inputs_translate in inputs_translate_list]
             logits_translate = torch.stack(logits_translate_list).mean(0)
             return 0.5 * logits + 0.5 * logits_translate
-            
+
         if hyp['net']['tta_level'] == 0:
             infer_fn = infer_basic
         elif hyp['net']['tta_level'] == 1:
