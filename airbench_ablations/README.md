@@ -1,6 +1,6 @@
 # Airbench ablations
 
-Each script adds a feature to the previous one.
+Each script in the `main%d_*` series adds a feature to the previous one.
 
 The architecture is the same as that in [hlb-cifar10](https://github.com/tysam-code/hlb-CIFAR10), with the following changes.
 1. We put BatchNorms in fp32 because this results in faster epochs than putting them in fp16.
