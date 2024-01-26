@@ -370,7 +370,7 @@ def main(run):
 
     for epoch in range(math.ceil(epochs)):
 
-        model[0].bias.requires_grad = (epoch <= hyp['opt']['whiten_bias_epochs'])
+        model[0].bias.requires_grad = (epoch < hyp['opt']['whiten_bias_epochs'])
 
         ####################
         #     Training     #
