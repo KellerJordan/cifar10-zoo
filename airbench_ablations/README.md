@@ -30,7 +30,7 @@ learnable bias to the first conv layer.
 -> increase to XX in 12.0 epochs / increased seconds
 -> 94% in 10.8 epochs / 4.3 seconds [ 94.01 in n=25 ]
 
-`main7_fliplr`: Adds alterating strategy for left-right flip augmentation.
+`main7_mirror`: Adds alterating strategy for left-right flip augmentation.
 -> 94% in 9.9 epochs / 3.95 seconds [ 94.02 in n=700 ]
 
 `main8_compile`: Adds usage of `torch.compile`. This is the final version.
