@@ -79,7 +79,7 @@ def train(train_loader, test_loader=None, epochs=hyp['opt']['epochs'], lr=hyp['o
                                 weight_decay=wd*batch_size)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule.__getitem__)
 
-    train_loss, train_acc, val_acc, test_acc = [], [], [0], [0]
+    train_loss, train_acc, val_acc, test_acc = [], [], [torch.nan], [torch.nan]
 
     it = tqdm(range(epochs))
     for epoch in it:
