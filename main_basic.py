@@ -224,9 +224,8 @@ def make_net():
         Mul(hyp['net']['scaling_factor']),
     )
     net[0].weight.requires_grad = False
-    net = net.cuda()
+    net = net.half().cuda()
     net = net.to(memory_format=torch.channels_last)
-    net.half()
     for mod in net.modules():
         if isinstance(mod, BatchNorm):
             mod.float()
