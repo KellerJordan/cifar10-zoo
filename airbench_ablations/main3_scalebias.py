@@ -299,8 +299,8 @@ def main(run):
     loss_fn = nn.CrossEntropyLoss(label_smoothing=hyp['opt']['label_smoothing'], reduction='none')
 
     train_augs = dict(flip=hyp['aug']['flip'], translate=hyp['aug']['translate'])
-    train_loader = PrepadCifarLoader('/tmp/cifar10', train=True, batch_size=batch_size, aug=train_augs)
-    test_loader = PrepadCifarLoader('/tmp/cifar10', train=False, batch_size=2000)
+    train_loader = PrepadCifarLoader('cifar10', train=True, batch_size=batch_size, aug=train_augs)
+    test_loader = PrepadCifarLoader('cifar10', train=False, batch_size=2000)
     if run == 'warmup':
         # The only purpose of the first run is to warmup, so we can use dummy data
         train_loader.labels = torch.randint(0, 10, size=(len(train_loader.labels),), device=train_loader.labels.device)
