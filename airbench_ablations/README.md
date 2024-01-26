@@ -12,6 +12,7 @@ Every time-to-94% is measured in seconds on a single NVIDIA A100.
 
 | Script | Feature | Epochs | Time | Evidence for >= 94% |
 | - | - | - | - | - |
+| `train_resnet18.py` | ResNet-18 training script optimized for time-to-94% | 26.0 | 51.0 | -- |
 | [cifar10-fast](https://github.com/davidcpage/cifar10-fast) | Fast training script as described in [How to Train Your ResNet](https://myrtle.ai/learn/how-to-train-your-resnet/) | 10.0 | 14.9 | -- |
 | `main0_baseline.py` | Trains the network with standard initialization, Nesterov SGD and data augmentation. Evaluates using random-flip TTA. | 35.0 | 14.5 | 94.06 in n=25 |
 | `main1_whiten.py` | Initializes first conv layer as whitening transform & removes proceeding BatchNorm. | 21.0 | 8.6 | 94.00 in n=200 |
