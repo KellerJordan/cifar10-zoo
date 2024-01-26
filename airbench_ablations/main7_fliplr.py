@@ -1,5 +1,3 @@
-# This is an uncompiled variant of airbench_cifar10.py which runs in 3.9 seconds.
-
 #############################################
 #            Setup/Hyperparameters          #
 #############################################

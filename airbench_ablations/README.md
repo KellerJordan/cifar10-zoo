@@ -28,10 +28,10 @@ learnable bias to the first conv layer.
 
 `main_tta`: Adds extra multi-crop TTA.
 -> increase to XX in 12.0 epochs / increased seconds
--> 94% in 11.0 epochs / 4.36 seconds
+-> 94% in 10.8 epochs / 4.3 seconds [ 94.01 in n=25 ]
 
 `main_fliplr`: Adds alterating strategy for left-right flip augmentation.
--> 94% in 9.9 epochs / XX seconds
+-> 94% in 9.9 epochs / 3.95 seconds [ 94.02 in n=700 ]
 
 `main_compile`: Adds usage of `torch.compile`.
 -> 94% in 9.9 epochs / 3.5 seconds [ 94.02 in n=700 ]
