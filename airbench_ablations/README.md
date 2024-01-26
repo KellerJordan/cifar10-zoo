@@ -17,7 +17,7 @@ Times are measured in seconds on a single NVIDIA A100.
 | `main3_scalebias.py` | Adds scaling of learning rate for BatchNorm biases by 64x. | 13.5 | 5.5 | 94.01 in n=200 |
 | `main4_freeze.py` | Freezes first conv layer bias after 3 epochs. | 13.5 | 5.2 | 94.03 in n=500 |
 | `main5_lookahead.py` | Adds lookahead / EMA-based optimization scheme from hlb-cifar10. | 12.0 | 4.6 | 94.03 in n=50 |
-| `main6_tta.py` | Adds extra multi-crop TTA. | 10.8 | 4.3 | 94.01 in n=25 |
+| `main6_tta.py` | Adds extra multi-crop TTA. | 10.8 | 4.3 | 94.02 in n=200 |
 | `main7_mirror.py` | Adds alterating strategy for left-right flip augmentation. | 9.9 | 3.95 | 94.02 in n=700 |
 | `main8_compile.py` | Adds usage of `torch.compile`. This is the final version. | 9.9 | 3.5 | 94.02 in n=700 |
 
