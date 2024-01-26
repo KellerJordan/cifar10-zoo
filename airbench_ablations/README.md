@@ -21,7 +21,7 @@ learnable bias to the first conv layer.
 -> 94% in 13.5 epochs / 5.5 seconds. [ 94.01 in n=200 ]
 
 `main4_freeze.py`: Freezes first conv layer bias after 3 epochs.
--> 94% in 13.5 epochs / 5.2 seconds. [ 94.02 in n=25 ]
+-> 94% in 13.5 epochs / 5.2 seconds. [ 94.03 in n=500 ]
 
 #`main_lookahead.py`: Adds the lookahead / EMA-based optimization scheme from hlb-cifar10.
 #-> [ 93.97% in n=25 ] -- on top of `main_freeze`
@@ -48,4 +48,7 @@ Note: lookahead only helps when combined with fast BatchNorm momentum, and vice 
 * Optimization (scalebias, lookahead, progressive freezing)
 * Evaluation (more tta)
 * Data distribution (alternating flip)
+
+## TODO
+* run `main_fastbn_lrsched.py` -- does fastbn + new lr sched do better than `main4_freeze`? doubt either one does alone
 
