@@ -49,7 +49,7 @@ if __name__ == '__main__':
     test_loader = convert_catdog(CifarLoader('cifar10', train=False))
 
     print('Training on full cat/dog set...')
-    #train(train_loader, test_loader)
+    train(train_loader, test_loader)
 
     print('Training weak classifier to use for splitting...')
     model, _ = train(train_loader, test_loader, epochs=1)
