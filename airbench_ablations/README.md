@@ -8,7 +8,7 @@ Our network architecture is the same as that in [hlb-cifar10](https://github.com
 3. We reduce the final block width from 512 to 256.
 4. We add a learnable bias to the first conv layer.
 
-Runtimes are measured in seconds on a single NVIDIA A100.
+Runtimes are measured in seconds on a single NVIDIA A100. Each script attains slightly over 94% accuracy.
 
 | Script | Feature | Time | TFLOPs | Epochs | Evidence for >= 94% |
 | - | - | - | - | - | - |
