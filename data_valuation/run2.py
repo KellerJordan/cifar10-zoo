@@ -1,15 +1,16 @@
 # Sample output:
 """
 Training on full cat/dog set...
-Acc=1.0000(train),0.8955(test): 100%|███████████████████| 200/200 [03:15<00:00,  1.02it/s]
+Acc=1.0000(train),nan(val),0.9060(test): 100%|██████████| 200/200 [00:45<00:00,  4.43it/s]
 Training weak classifier to use for splitting...
-Acc=0.8320(train),0.8010(test): 100%|███████████████████████| 8/8 [00:07<00:00,  1.09it/s]
+Acc=0.6600(train),nan(val),0.6155(test): 100%|██████████████| 1/1 [00:00<00:00,  4.64it/s]
+Class balance: 0.5006
 Constructing subset A of correctly predicted examples...
-Training on set A (8987 examples)...
-Acc=1.0000(train),0.8625(test): 100%|███████████████████| 200/200 [02:41<00:00,  1.24it/s]
+Training on set A (4964 examples)...
+Acc=1.0000(train),nan(val),0.6540(test): 100%|██████████| 200/200 [00:20<00:00,  9.56it/s]
 Constructing subset B of incorrectly predicted examples...
-Training on set B (1013 examples)...
-Acc=1.0000(train),0.2830(test): 100%|███████████████████| 200/200 [00:29<00:00,  6.67it/s]
+Training on set B (5036 examples)...
+Acc=1.0000(train),nan(val),0.6900(test): 100%|██████████| 200/200 [00:23<00:00,  8.69it/s]
 """
 
 import torch
@@ -60,7 +61,7 @@ if __name__ == '__main__':
     q1 = margins[labels == 1].float().quantile(0.5)
     mask = ((labels == 0) & (margins < q0)) | ((labels == 1) & (margins < q1))
     #mask = (torch.rand_like(margins) < 0.5)
-    print(loader.labels[mask].float().mean())
+    print('Class balance: %.4f' % loader.labels[mask].float().mean())
     
     print('Constructing subset A of correctly predicted examples...')
     loader = convert_catdog(CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4)))
