@@ -47,10 +47,10 @@
 # The 8-layer convnet we train has 2M parameters and uses 0.24 GFLOPs per forward pass. The entire
 # training run uses 350 TFLOPs, which could theoretically take 1.12 A100-seconds at perfect utilization.
 #
-# For comparison, version 0.7.0 of https://github.com/tysam-code/hlb-CIFAR10 uses 587 TFLOPs and runs in
+# For comparison, version 0.7.0 of https://github.com/tysam-code/hlb-CIFAR10 uses 572 TFLOPs and runs in
 # 6.2 seconds. The final training script from David Page's series "How to Train Your ResNet" (Page 2018)
-# uses 1,148 TFLOPs and runs in 14.9 seconds (on an A100). And the standard 200-epoch ResNet18 training
-# on CIFAR-10 uses ~30,000 TFLOPs and runs in minutes.
+# uses 1,144 TFLOPs and runs in 14.9 seconds (on an A100). And an optimized-for-94% ResNet18 training
+# ~4,350 TFLOPs and runs in ~60s.
 #
 # This script is descended from https://github.com/tysam-code/hlb-CIFAR10 [1], which itself is descended
 # from David Page's training script [2]. The latter was the winning submission to the Stanford DAWNbench
