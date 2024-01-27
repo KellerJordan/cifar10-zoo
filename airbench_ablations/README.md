@@ -14,7 +14,7 @@ Runtimes are measured in seconds on a single NVIDIA A100.
 | - | - | - | - | - | - |
 | `train_resnet18.py` | ResNet-18 training script optimized for time-to-94% | 52.1  | 4350 | 26.0 | 94.01 in n=10 |
 | [cifar10-fast](https://github.com/davidcpage/cifar10-fast) | Fast training script as described in [How to Train Your ResNet](https://myrtle.ai/learn/how-to-train-your-resnet/) | 14.9 | 1144 | 10.0 | -- |
-| `main0_network.py` | Trains the network with standard initialization, Nesterov SGD and data augmentation. Evaluates using random-flip TTA. | 14.5 | 1223 | 35.0 | 94.06 in n=25 |
+| `main0_network.py` | Trains with standard initialization, Nesterov SGD and data augmentation. Evaluates with random-flip TTA. | 14.5 | 1223 | 35.0 | 94.06 in n=25 |
 | `main1_whiten.py` | Initializes first conv layer as whitening transform & removes proceeding BatchNorm. | 8.6 | 735 | 21.0 | 94.00 in n=200 |
 | `main2_dirac.py` | Initializes all other conv layers as (partly) identity transforms. | 7.3 | 631 | 18.0 | 94.01 in n=200 |
 | [hlb-cifar10](https://github.com/tysam-code/hlb-CIFAR10) | Hyperlightspeedbench -- fast training script | 6.2 | 572 | 12.1 | -- |
