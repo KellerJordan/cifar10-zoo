@@ -5,10 +5,8 @@ Acc=1.0000(train),nan(val),0.9060(test): 100%|██████████| 20
 Training weak classifier to use for splitting...
 Acc=0.6600(train),nan(val),0.6155(test): 100%|██████████████| 1/1 [00:00<00:00,  4.64it/s]
 Class balance: 0.5006
-Constructing subset A of correctly predicted examples...
 Training on set A (4964 examples)...
 Acc=1.0000(train),nan(val),0.6540(test): 100%|██████████| 200/200 [00:20<00:00,  9.56it/s]
-Constructing subset B of incorrectly predicted examples...
 Training on set B (5036 examples)...
 Acc=1.0000(train),nan(val),0.6900(test): 100%|██████████| 200/200 [00:23<00:00,  8.69it/s]
 """
@@ -63,14 +61,12 @@ if __name__ == '__main__':
     #mask = (torch.rand_like(margins) < 0.5)
     print('Class balance: %.4f' % loader.labels[mask].float().mean())
     
-    print('Constructing subset A of correctly predicted examples...')
     loader = convert_catdog(CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4)))
     loader.images = loader.images[mask] 
     loader.labels = loader.labels[mask]
     print('Training on set A (%d examples)...' % mask.sum())
     train(loader, test_loader)
 
-    print('Constructing subset B of incorrectly predicted examples...')
     loader = convert_catdog(CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4)))
     loader.images = loader.images[~mask] 
     loader.labels = loader.labels[~mask]
