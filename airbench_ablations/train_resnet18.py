@@ -172,12 +172,10 @@ class BasicBlock(nn.Module):
                           stride=stride, bias=False),
                 nn.BatchNorm2d(planes))
 
-    def forward(self, x, fake_relu=False):
+    def forward(self, x):
         out = F.relu(self.bn1(self.conv1(x)))
         out = self.bn2(self.conv2(out))
         out += self.shortcut(x)
-        if fake_relu:
-            return FakeReLU.apply(out)
         return F.relu(out)
 
 class ResNet(nn.Module):
