@@ -11,7 +11,7 @@ Our network architecture is the same as that in [hlb-cifar10](https://github.com
 Runtimes are measured in seconds on a single NVIDIA A100.
 
 | Script | Feature | Time | TFLOPs | Epochs | Evidence for >= 94% |
-| - | - | - | - | - |
+| - | - | - | - | - | - |
 | `train_resnet18.py` | ResNet-18 training script optimized for time-to-94% | 52.1  | 4350 | 26.0 | 94.01 in n=10 |
 | [cifar10-fast](https://github.com/davidcpage/cifar10-fast) | Fast training script as described in [How to Train Your ResNet](https://myrtle.ai/learn/how-to-train-your-resnet/) | 14.9 | 1144 | 10.0 | -- |
 | `main0_network.py` | Trains the network with standard initialization, Nesterov SGD and data augmentation. Evaluates using random-flip TTA. | 14.5 | 1223 | 35.0 | 94.06 in n=25 |
