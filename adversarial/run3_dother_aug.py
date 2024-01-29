@@ -1,4 +1,4 @@
-# This script generates both D_other and a synthetic shortcut variant of it in the same manner as the one
+# This script generates both D_other_aug and a synthetic shortcut variant of it in the same manner as the one
 # generated for D_det.
 # Sample output:
 """
@@ -40,23 +40,26 @@ if __name__ == '__main__':
     num_classes = 10
     adv_radius = 0.5
 
-    if False:
-        print('Training clean model...')
-        train_loader.load('datasets/clean_train.pt')
-        model, _ = train(train_loader)
+    print('Training clean model...')
+    train_loader.load('datasets/clean_train.pt')
+    model, _ = train(train_loader, epochs=20)
 
-        print('Generating D_other_aug...')
-        loader = CifarLoader('cifar10', train=True)
-        labels_rotate = torch.randint(1, num_classes, size=(len(loader.labels),), device=loader.labels.device)
-        loader.labels = (loader.labels + labels_rotate) % num_classes
-        loader = repeat_augs(loader, n_epochs=5)
-        loader = gen_adv_dataset(model, loader=loader, r=adv_radius, step_size=0.1)
-        loader.save('datasets/basic_dother_aug.pt')
-        print('Training on D_other_aug...')
-        train_loader.load('datasets/basic_dother_aug.pt')
-        model1, _ = train(train_loader, epochs=40)
+    print('Generating D_other_aug...')
+    loader = CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4), shuffle=False)
+    labels_rotate = torch.randint(1, num_classes, size=(len(loader.labels),), device=loader.labels.device)
+    loader.labels = (loader.labels + labels_rotate) % num_classes
+    loader = repeat_augs(loader, n_epochs=5)
+    loader = gen_adv_dataset(model, loader=loader, r=adv_radius, step_size=0.1)
+    loader.save('datasets/basic_dother_aug.pt')
+    print('Training on D_other_aug...')
+    train_loader.load('datasets/basic_dother_aug.pt')
+    model1, _ = train(train_loader, epochs=40)
 
     print('Generating leakage-only D_other_aug...')
+    loader = CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4), shuffle=False)
+    labels_rotate = torch.randint(1, num_classes, size=(len(loader.labels),), device=loader.labels.device)
+    loader.labels = (loader.labels + labels_rotate) % num_classes
+    loader = repeat_augs(loader, n_epochs=5)
     print('Sampling 10 fixed synthetic perturbations...')
     # Generate 10 fixed synthetic perturbations via deconvolution
     # - This was found to be the best shortcut in practice, much better than using Gaussian noise
@@ -69,10 +72,6 @@ if __name__ == '__main__':
     train_loader.load('datasets/clean_train.pt')
     model, _ = train(train_loader, epochs=2)
     print('Applying perturbations/deltas...')
-    loader = CifarLoader('cifar10', train=True)
-    labels_rotate = torch.randint(1, num_classes, size=(len(loader.labels),), device=loader.labels.device)
-    loader.labels = (loader.labels + labels_rotate) % num_classes
-    loader = repeat_augs(loader, n_epochs=5)
     with torch.no_grad():
         outputs = torch.cat([model(inputs) for inputs in loader.normalize(loader.images).split(500)])
         mask = (outputs.argmax(1) == loader.labels)
