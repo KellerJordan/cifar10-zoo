@@ -63,7 +63,6 @@ if __name__ == '__main__':
     print('Contains %d examples' % mask.sum())
     train_loader.images = loader.images[mask]
     train_loader.labels = loader.labels[mask]
-    train_loader.save('datasets/basic_dother_top40.pt')
     model1, _ = train(train_loader)
 
     print('Generating leakage-only D_other-top40...')
@@ -80,7 +79,8 @@ if __name__ == '__main__':
     model, _ = train(train_loader, epochs=1)
     print('Applying perturbations/deltas...')
     loader = CifarLoader('cifar10', train=True)
-    loader.load('datasets/basic_dother_top40.pt')
+    loader.images = loader.images[mask]
+    loader.labels = loader.labels[mask]
     with torch.no_grad():
         outputs = torch.cat([model(inputs) for inputs in loader.normalize(loader.images).split(500)])
         mask = (outputs.argmax(1) == loader.labels)
