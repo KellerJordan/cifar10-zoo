@@ -87,9 +87,9 @@ if __name__ == '__main__':
     print('Using delta=0 for n=%d examples' % mask.sum())
     print('Using synthetic delta for n=%d examples' % (~mask).sum())
     loader.images[~mask] = (loader.images[~mask] + synthetic_noise[loader.labels[~mask]]).clip(0, 1)
-    loader.save('datasets/leak_dother.pt')
+    loader.save('datasets/leak_dother_top40.pt')
     print('Training on leakage-only D_other_top40...')
-    train_loader.load('datasets/leak_dother.pt')
+    train_loader.load('datasets/leak_dother_top40.pt')
     model1, _ = train(train_loader)
 
     print('Training on bottom 60% most fooling examples...')
