@@ -4,19 +4,16 @@
 """
 Training clean model...
 Acc=1.0000(train),0.9365(test): 100%|█████████████████████████████| 200/200 [03:35<00:00,  1.08s/it]
-Clean test accuracy: 0.9365
 Generating D_rand...
 100%|█████████████████████████████████████████████████████████████| 100/100 [01:51<00:00,  1.11s/it]
 Fooling rate: 0.9367
 Training on D_rand...
 Acc=1.0000(train),0.8390(test): 100%|█████████████████████████████| 200/200 [03:33<00:00,  1.07s/it]
-Clean test accuracy: 0.8390
 Generating D_det...
 100%|█████████████████████████████████████████████████████████████| 100/100 [01:51<00:00,  1.11s/it]
 Fooling rate: 0.9271
 Training on D_det...
 Acc=1.0000(train),0.1981(test): 100%|█████████████████████████████| 200/200 [03:32<00:00,  1.06s/it]
-Clean test accuracy: 0.1981
 """
 
 import os
@@ -30,28 +27,23 @@ from adversarial import gen_adv_dataset
 
 if __name__ == '__main__':
 
-    os.makedirs('datasets', exist_ok=True)
-
     train_loader = CifarLoader('cifar10', train=True, batch_size=500, aug=dict(flip=True, translate=4))
     test_loader = CifarLoader('cifar10', train=False)
 
     print('Training clean model...')
     model, _ = train(train_loader)
-    print('Clean test accuracy: %.4f' % evaluate(model, test_loader))
 
     print('Generating D_rand...')
     loader = gen_adv_dataset(model, dtype='drand', r=0.5, step_size=0.1)
     loader.save('datasets/replicate_drand.pt')
-    train_loader.load('datasets/replicate_drand.pt')
     print('Training on D_rand...')
+    train_loader.load('datasets/replicate_drand.pt')
     model1, _ = train(train_loader)
-    print('Clean test accuracy: %.4f' % evaluate(model1, test_loader))
 
     print('Generating D_det...')
     loader = gen_adv_dataset(model, dtype='ddet', r=0.5, step_size=0.1)
     loader.save('datasets/replicate_ddet.pt')
-    train_loader.load('datasets/replicate_ddet.pt')
     print('Training on D_det...')
+    train_loader.load('datasets/replicate_ddet.pt')
     model1, _ = train(train_loader)
-    print('Clean test accuracy: %.4f' % evaluate(model1, test_loader))
 
