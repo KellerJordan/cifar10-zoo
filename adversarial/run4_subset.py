@@ -38,6 +38,7 @@ def get_margins(model, loader):
 if __name__ == '__main__':
 
     train_loader = CifarLoader('cifar10', train=True, batch_size=500, aug=dict(flip=True, translate=4))
+    train_loader.save('datasets/clean_train.pt')
     test_loader = CifarLoader('cifar10', train=False)
     num_classes = 10
     adv_radius = 0.5
@@ -62,6 +63,33 @@ if __name__ == '__main__':
     print('Contains %d examples' % mask.sum())
     train_loader.images = loader.images[mask]
     train_loader.labels = loader.labels[mask]
+    train_loader.save('datasets/basic_dother_top40.pt')
+    model1, _ = train(train_loader)
+
+    print('Generating leakage-only D_other-top40...')
+    print('Sampling 10 fixed synthetic perturbations...')
+    # Generate 10 fixed synthetic perturbations via deconvolution
+    # - This was found to be the best shortcut in practice, much better than using Gaussian noise
+    deconv = nn.ConvTranspose2d(1, 30, 3, stride=2, padding=0, bias=False)
+    with torch.no_grad():
+        noise = deconv(torch.ones(1, 16, 16))[:, 1:, 1:].reshape(10, 3, 32, 32).cuda().half()
+    unit_noise = noise / noise.reshape(len(noise), -1).norm(dim=1)[:, None, None, None]
+    synthetic_noise = adv_radius * unit_noise
+    print('Training clean model to select shortcutted-away subset...')
+    train_loader.load('datasets/clean_train.pt')
+    model, _ = train(train_loader, epochs=1)
+    print('Applying perturbations/deltas...')
+    loader = CifarLoader('cifar10', train=True)
+    loader.load('datasets/basic_dother_top40.pt')
+    with torch.no_grad():
+        outputs = torch.cat([model(inputs) for inputs in loader.normalize(loader.images).split(500)])
+        mask = (outputs.argmax(1) == loader.labels)
+    print('Using delta=0 for n=%d examples' % mask.sum())
+    print('Using synthetic delta for n=%d examples' % (~mask).sum())
+    loader.images[~mask] = (loader.images[~mask] + synthetic_noise[loader.labels[~mask]]).clip(0, 1)
+    loader.save('datasets/leak_dother.pt')
+    print('Training on leakage-only D_other_top40...')
+    train_loader.load('datasets/leak_dother.pt')
     model1, _ = train(train_loader)
 
     print('Training on bottom 60% most fooling examples...')
