@@ -38,16 +38,16 @@ def gen_adv_dataset(model, dtype='dother', loader=None, **pgd_kwargs):
     assert dtype in ['drand', 'ddet', 'dother']
     if loader is None:
         loader = CifarLoader('cifar10', train=True, batch_size=500, shuffle=False, drop_last=False)
-    labels = loader.labels
-    num_classes = 10
-    if dtype == 'drand':
-        loader.labels = torch.randint(num_classes, size=(len(labels),), device=labels.device)
-    elif dtype == 'ddet':
-        loader.labels = (labels + 1) % num_classes
-    elif dtype == 'dother':
-        labels_rotate = torch.randint(1, num_classes, size=(len(labels),), device=labels.device)
-        loader.labels = (labels + labels_rotate) % num_classes
-    
+        labels = loader.labels
+        num_classes = 10
+        if dtype == 'drand':
+            loader.labels = torch.randint(num_classes, size=(len(labels),), device=labels.device)
+        elif dtype == 'ddet':
+            loader.labels = (labels + 1) % num_classes
+        elif dtype == 'dother':
+            labels_rotate = torch.randint(1, num_classes, size=(len(labels),), device=labels.device)
+            loader.labels = (labels + labels_rotate) % num_classes
+
     inputs_adv = []
     for inputs, labels in tqdm(loader):
         delta = pgd(inputs, labels, model, **pgd_kwargs)
