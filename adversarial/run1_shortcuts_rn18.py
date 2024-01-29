@@ -14,6 +14,13 @@ Acc=1.0000(train),0.7575(test): 100%|██████████████�
 Generating leakage-only D_det...
 Training clean model to select subset to shortcut-away...
 Acc=0.5420(train),0.5724(test): 100%|███████████████████████| 1/1 [00:02<00:00,  2.19s/it]
+Generating leakage-only D_det...
+Training clean model to select subset to shortcut-away...
+Acc=0.5540(train),0.5725(test): 100%|███████████████████████| 1/1 [00:04<00:00,  4.70s/it]
+Using delta=0 for n=1847 examples
+Using synthetic delta for n=48153 examples
+Training on leakage-only D_det...
+Acc=1.0000(train),0.3872(test): 100%|███████████████████| 200/200 [07:17<00:00,  2.19s/it]
 """
 
 import torch
@@ -57,7 +64,7 @@ if __name__ == '__main__':
     print('Generating leakage-only D_det...')
     print('Training clean model to select subset to shortcut-away...')
     train_loader.load('datasets/clean_train.pt')
-    model, _ = train(train_loader, epochs=1)
+    model, _ = train(train_loader, epochs=2)
 
     loader = CifarLoader('cifar10', train=True)
     loader.labels = (loader.labels + 1) % num_classes
