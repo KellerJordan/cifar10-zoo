@@ -4,7 +4,7 @@
 # * But unlike the originals, the perturbations here do not arise as features, being strictly synthetic noise.
 # * Nevertheless, we still see generalization to clean test data, because of the way we choose which examples
 #   to perturb and which to leave alone.
-# Sample output is as follows.
+# Sample output is as follows (lr=0.05).
 """
 Generating leakage-only D_rand...
 Using delta=0 for n=4971 examples
@@ -45,20 +45,19 @@ if __name__ == '__main__':
     unit_noise = noise / noise.reshape(len(noise), -1).norm(dim=1)[:, None, None, None]
     synthetic_noise = adv_radius * unit_noise
 
-    if False:
-        # Leakage-only D_rand
-        print('Generating leakage-only D_rand...')
-        loader = CifarLoader('cifar10', train=True)
-        drand_targets = torch.randint(num_classes, size=(len(loader.labels),), device=loader.labels.device)
-        mask = (loader.labels == drand_targets)
-        loader.labels = drand_targets
-        print('Using delta=0 for n=%d examples' % mask.sum())
-        print('Using synthetic delta for n=%d examples' % (~mask).sum())
-        loader.images[~mask] = (loader.images[~mask] + synthetic_noise[loader.labels[~mask]]).clip(0, 1)
-        loader.save('datasets/leak_drand.pt')
-        print('Training on leakage-only D_rand...')
-        train_loader.load('datasets/leak_drand.pt')
-        model1, _ = train(train_loader)
+    # Leakage-only D_rand
+    print('Generating leakage-only D_rand...')
+    loader = CifarLoader('cifar10', train=True)
+    drand_targets = torch.randint(num_classes, size=(len(loader.labels),), device=loader.labels.device)
+    mask = (loader.labels == drand_targets)
+    loader.labels = drand_targets
+    print('Using delta=0 for n=%d examples' % mask.sum())
+    print('Using synthetic delta for n=%d examples' % (~mask).sum())
+    loader.images[~mask] = (loader.images[~mask] + synthetic_noise[loader.labels[~mask]]).clip(0, 1)
+    loader.save('datasets/leak_drand.pt')
+    print('Training on leakage-only D_rand...')
+    train_loader.load('datasets/leak_drand.pt')
+    model1, _ = train(train_loader)
 
     # Leakage-only D_det
     print('Generating leakage-only D_det...')
