@@ -38,12 +38,12 @@ if __name__ == '__main__':
     loader.save('datasets/replicate_drand.pt')
     print('Training on D_rand...')
     train_loader.load('datasets/replicate_drand.pt')
-    model1, _ = train(train_loader)
+    train(train_loader)
 
     print('Generating D_det...')
     loader = gen_adv_dataset(model, dtype='ddet', r=0.5, step_size=0.1)
     loader.save('datasets/replicate_ddet.pt')
     print('Training on D_det...')
     train_loader.load('datasets/replicate_ddet.pt')
-    model1, _ = train(train_loader)
+    train(train_loader)
 

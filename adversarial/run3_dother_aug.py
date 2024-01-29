@@ -47,23 +47,22 @@ if __name__ == '__main__':
     num_classes = 10
     adv_radius = 0.5
 
-    if False:
-        print('Training clean model...')
-        train_loader.load('datasets/clean_train.pt')
-        model, _ = train(train_loader)
+    print('Training clean model...')
+    train_loader.load('datasets/clean_train.pt')
+    model, _ = train(train_loader)
 
-        print('Generating D_other_aug...')
-        loader = CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4), shuffle=False)
-        labels_rotate = torch.randint(1, num_classes, size=(len(loader.labels),), device=loader.labels.device)
-        loader.labels = (loader.labels + labels_rotate) % num_classes
-        loader = repeat_augs(loader, n_epochs=5)
-        loader = gen_adv_dataset(model, loader=loader, r=adv_radius, step_size=0.1)
-        loader.save('datasets/basic_dother_aug.pt')
-        print('Training on D_other_aug...')
-        train_loader.load('datasets/basic_dother_aug.pt')
-        train_loader.aug = {}
-        model1, _ = train(train_loader, epochs=40)
-        train_loader.aug = dict(flip=True, translate=4)
+    print('Generating D_other_aug...')
+    loader = CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4), shuffle=False)
+    labels_rotate = torch.randint(1, num_classes, size=(len(loader.labels),), device=loader.labels.device)
+    loader.labels = (loader.labels + labels_rotate) % num_classes
+    loader = repeat_augs(loader, n_epochs=5)
+    loader = gen_adv_dataset(model, loader=loader, r=adv_radius, step_size=0.1)
+    loader.save('datasets/basic_dother_aug.pt')
+    print('Training on D_other_aug...')
+    train_loader.load('datasets/basic_dother_aug.pt')
+    train_loader.aug = {}
+    train(train_loader, epochs=40)
+    train_loader.aug = dict(flip=True, translate=4)
 
     print('Generating leakage-only D_other_aug...')
     loader = CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4), shuffle=False)
@@ -92,6 +91,6 @@ if __name__ == '__main__':
     print('Training on leakage-only D_other_aug...')
     train_loader.load('datasets/leak_dother_aug.pt')
     train_loader.aug = {}
-    model1, _ = train(train_loader, epochs=40)
+    train(train_loader, epochs=40)
     train_loader.aug = dict(flip=True, translate=4)
 

@@ -51,7 +51,7 @@ if __name__ == '__main__':
     loader.save('datasets/basic_dother.pt')
     train_loader.load('datasets/basic_dother.pt')
     print('Training on D_other...')
-    model1, _ = train(train_loader)
+    #train(train_loader)
 
     # Get the target-class logit margins for D_other in order to construct various subsets
     loader = CifarLoader('cifar10', shuffle=False)
@@ -63,7 +63,7 @@ if __name__ == '__main__':
     print('Contains %d examples' % mask.sum())
     train_loader.images = loader.images[mask]
     train_loader.labels = loader.labels[mask]
-    model1, _ = train(train_loader)
+    train(train_loader)
 
     print('Generating leakage-only D_other-top40...')
     print('Sampling 10 fixed synthetic perturbations...')
@@ -90,14 +90,16 @@ if __name__ == '__main__':
     loader.save('datasets/leak_dother_top40.pt')
     print('Training on leakage-only D_other_top40...')
     train_loader.load('datasets/leak_dother_top40.pt')
-    model1, _ = train(train_loader)
+    train(train_loader)
 
     print('Training on bottom 60% most fooling examples...')
+    loader = CifarLoader('cifar10', shuffle=False)
+    loader.load('datasets/basic_dother.pt')
     mask = (margins < margins.float().quantile(0.6))
     print('Contains %d examples' % mask.sum())
     train_loader.images = loader.images[mask]
     train_loader.labels = loader.labels[mask]
-    model1, _ = train(train_loader)
+    train(train_loader)
 
     print('Training on bottom 60% most fooling examples, with perturbation scaled up by 2x...')
     mult_r = 2.0
@@ -105,5 +107,5 @@ if __name__ == '__main__':
     adv_images = train_loader.images
     scaled_adv_images = (mult_r * (adv_images - clean_images) + clean_images).clip(0, 1)
     train_loader.images = scaled_adv_images
-    model1, _ = train(train_loader)
+    train(train_loader)
 

@@ -57,7 +57,7 @@ if __name__ == '__main__':
     loader.save('datasets/leak_drand.pt')
     print('Training on leakage-only D_rand...')
     train_loader.load('datasets/leak_drand.pt')
-    model1, _ = train(train_loader)
+    train(train_loader)
 
     # Leakage-only D_det
     print('Generating leakage-only D_det...')
@@ -76,5 +76,5 @@ if __name__ == '__main__':
     loader.save('datasets/leak_ddet.pt')
     print('Training on leakage-only D_det...')
     train_loader.load('datasets/leak_ddet.pt')
-    model1, _ = train(train_loader)
+    train(train_loader)
 

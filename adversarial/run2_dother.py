@@ -44,7 +44,7 @@ if __name__ == '__main__':
     loader.save('datasets/basic_dother.pt')
     print('Training on D_other...')
     train_loader.load('datasets/basic_dother.pt')
-    model1, _ = train(train_loader)
+    train(train_loader)
 
     print('Generating leakage-only D_other...')
     print('Sampling 10 fixed synthetic perturbations...')
@@ -71,5 +71,5 @@ if __name__ == '__main__':
     loader.save('datasets/leak_dother.pt')
     print('Training on leakage-only D_other...')
     train_loader.load('datasets/leak_dother.pt')
-    model1, _ = train(train_loader)
+    train(train_loader)
 
