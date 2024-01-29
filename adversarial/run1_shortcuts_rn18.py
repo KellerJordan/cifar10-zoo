@@ -63,7 +63,7 @@ if __name__ == '__main__':
     print('Generating leakage-only D_det...')
     print('Training clean model to select subset to shortcut-away...')
     train_loader.load('datasets/clean_train.pt')
-    model, _ = train(train_loader, epochs=2)
+    model, _ = train(train_loader, epochs=1)
 
     loader = CifarLoader('cifar10', train=True)
     loader.labels = (loader.labels + 1) % num_classes
