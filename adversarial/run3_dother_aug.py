@@ -70,7 +70,7 @@ if __name__ == '__main__':
     synthetic_noise = adv_radius * unit_noise
     print('Training clean model to select shortcutted-away subset...')
     train_loader.load('datasets/clean_train.pt')
-    model, _ = train(train_loader, epochs=2)
+    model, _ = train(train_loader, epochs=1)
     print('Applying perturbations/deltas...')
     with torch.no_grad():
         outputs = torch.cat([model(inputs) for inputs in loader.normalize(loader.images).split(500)])
