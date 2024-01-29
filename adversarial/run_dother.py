@@ -4,21 +4,20 @@
 """
 Training clean model...
 Acc=1.0000(train),0.9432(test): 100%|███████████████████| 200/200 [03:35<00:00,  1.08s/it]
-Clean test accuracy: 0.9432
 Generating D_other...
 100%|███████████████████████████████████████████████████| 100/100 [01:51<00:00,  1.12s/it]
 Fooling rate: 0.9313
 Training on D_other...
 Acc=1.0000(train),0.6728(test): 100%|███████████████████| 200/200 [03:34<00:00,  1.07s/it]
-Clean test accuracy: 0.6728
 Generating leakage-only D_other...
-Training clean model to select subset of D_other...
-Acc=0.6240(train),0.6327(test): 100%|███████████████████████| 1/1 [00:01<00:00,  1.13s/it]
-Using delta=0 for n=2043 examples
-Using synthetic delta for n=47957 examples
+Sampling 10 fixed synthetic perturbations...
+Training clean model to select shortcutted-away subset...
+Acc=0.6480(train),nan(val),0.6533(test): 100%|██████████████| 1/1 [00:03<00:00,  3.45s/it]
+Applying perturbations/deltas...
+Using delta=0 for n=1860 examples
+Using synthetic delta for n=48140 examples
 Training on leakage-only D_other...
-Acc=1.0000(train),0.4725(test): 100%|███████████████████| 200/200 [03:35<00:00,  1.08s/it]
-Clean test accuracy: 0.4725
+Acc=1.0000(train),nan(val),0.5013(test): 100%|██████████| 200/200 [03:34<00:00,  1.07s/it]
 """
 
 import torch
@@ -39,7 +38,6 @@ if __name__ == '__main__':
     print('Training clean model...')
     train_loader.load('datasets/clean_train.pt')
     model, _ = train(train_loader)
-    print('Clean test accuracy: %.4f' % evaluate(model, test_loader))
 
     print('Generating D_other...')
     loader = gen_adv_dataset(model, dtype='dother', r=adv_radius, step_size=0.1)
@@ -47,7 +45,6 @@ if __name__ == '__main__':
     print('Training on D_other...')
     train_loader.load('datasets/basic_dother.pt')
     model1, _ = train(train_loader)
-    print('Clean test accuracy: %.4f' % evaluate(model1, test_loader))
 
     print('Generating leakage-only D_other...')
     print('Sampling 10 fixed synthetic perturbations...')
@@ -75,5 +72,4 @@ if __name__ == '__main__':
     print('Training on leakage-only D_other...')
     train_loader.load('datasets/leak_dother.pt')
     model1, _ = train(train_loader)
-    print('Clean test accuracy: %.4f' % evaluate(model1, test_loader))
 
