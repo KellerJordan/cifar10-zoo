@@ -9,7 +9,7 @@ Fooling rate: 0.9304
 Training on D_other...
 Acc=1.0000(train),0.6603(test): 100%|███████████████████| 200/200 [03:33<00:00,  1.07s/it]
 Training on top 40% most fooling examples...
-Contains 19996 examples
+Contains 20071 examples
 Acc=1.0000(train),0.7818(test): 100%|███████████████████| 200/200 [01:30<00:00,  2.21it/s]
 Training on bottom 60% most fooling examples...
 Contains 29929 examples
@@ -58,7 +58,7 @@ if __name__ == '__main__':
     margins = get_margins(model, loader)
 
     print('Training on top 40% most fooling examples...')
-    mask = (margins > margins.float().quantile(0.6))
+    mask = (margins >= margins.float().quantile(0.6))
     print('Contains %d examples' % mask.sum())
     train_loader.images = loader.images[mask]
     train_loader.labels = loader.labels[mask]

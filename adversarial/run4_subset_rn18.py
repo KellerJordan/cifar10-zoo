@@ -1,19 +1,6 @@
 # This script trains on various subsets of D_other
 # Sample output:
 """
-Training clean model...
-Acc=1.0000(train),0.9398(test): 100%|███████████████████| 200/200 [03:35<00:00,  1.08s/it]
-Generating D_other...
-100%|███████████████████████████████████████████████████| 100/100 [01:51<00:00,  1.12s/it]
-Fooling rate: 0.9304
-Training on D_other...
-Acc=1.0000(train),0.6603(test): 100%|███████████████████| 200/200 [03:33<00:00,  1.07s/it]
-Training on bottom 60% most fooling examples...
-Contains 29929 examples
-Acc=1.0000(train),0.0296(test): 100%|███████████████████| 200/200 [02:11<00:00,  1.53it/s]
-Training on top 40% most fooling examples...
-Contains 19996 examples
-Acc=1.0000(train),0.7818(test): 100%|███████████████████| 200/200 [01:30<00:00,  2.21it/s]
 """
 
 import torch
@@ -58,7 +45,7 @@ if __name__ == '__main__':
     margins = get_margins(model, loader)
 
     print('Training on top 40% most fooling examples...')
-    mask = (margins > margins.float().quantile(0.6))
+    mask = (margins >= margins.float().quantile(0.6))
     print('Contains %d examples' % mask.sum())
     train_loader.images = loader.images[mask]
     train_loader.labels = loader.labels[mask]
