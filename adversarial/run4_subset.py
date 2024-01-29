@@ -51,7 +51,7 @@ if __name__ == '__main__':
     loader.save('datasets/basic_dother.pt')
     train_loader.load('datasets/basic_dother.pt')
     print('Training on D_other...')
-    #train(train_loader)
+    train(train_loader)
 
     # Get the target-class logit margins for D_other in order to construct various subsets
     loader = CifarLoader('cifar10', shuffle=False)
