@@ -6,25 +6,13 @@
 #   to perturb and which to leave alone.
 # Sample output is as follows.
 """
-Generating leakage-only D_rand...
-Using delta=0 for n=4980 examples
-Using synthetic delta for n=45020 examples
-Training on leakage-only D_rand...
-Acc=1.0000(train),0.7951(test): 100%|█████████| 200/200 [03:36<00:00,  1.08s/it]
-Generating leakage-only D_det...
-Training clean model to select subset of D_det...
-Acc=0.6000(train),0.6310(test): 100%|█████████████| 1/1 [00:01<00:00,  1.08s/it]
-Using delta=0 for n=1685 examples
-Using synthetic delta for n=48315 examples
-Training on leakage-only D_det...
-Acc=1.0000(train),0.3231(test): 100%|█████████| 200/200 [03:33<00:00,  1.07s/it]
 """
 
 import torch
 from torch import nn
 
 from loader import CifarLoader
-from train import train, evaluate
+from train_rn18 import train, evaluate
 
 if __name__ == '__main__':
 
