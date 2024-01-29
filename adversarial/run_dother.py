@@ -30,23 +30,27 @@ from train import train, evaluate
 
 if __name__ == '__main__':
 
+    train_loader = CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4))
+    train_loader.save('datasets/clean_train.pt')
     test_loader = CifarLoader('cifar10', train=False)
     num_classes = 10
     adv_radius = 0.5
 
     print('Training clean model...')
-    train_loader = CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4))
+    train_loader.load('datasets/clean_train.pt')
     model, _ = train(train_loader)
     print('Clean test accuracy: %.4f' % evaluate(model, test_loader))
 
     print('Generating D_other...')
     loader = gen_adv_dataset(model, dtype='dother', r=adv_radius, step_size=0.1)
     loader.save('datasets/basic_dother.pt')
-    train_loader.load('datasets/basic_dother.pt')
     print('Training on D_other...')
+    train_loader.load('datasets/basic_dother.pt')
     model1, _ = train(train_loader)
     print('Clean test accuracy: %.4f' % evaluate(model1, test_loader))
 
+    print('Generating leakage-only D_other...')
+    print('Sampling 10 fixed synthetic perturbations...')
     # Generate 10 fixed synthetic perturbations via deconvolution
     # - This was found to be the best shortcut in practice, much better than using Gaussian noise
     deconv = nn.ConvTranspose2d(1, 30, 3, stride=2, padding=0, bias=False)
@@ -54,22 +58,22 @@ if __name__ == '__main__':
         noise = deconv(torch.ones(1, 16, 16))[:, 1:, 1:].reshape(10, 3, 32, 32).cuda().half()
     unit_noise = noise / noise.reshape(len(noise), -1).norm(dim=1)[:, None, None, None]
     synthetic_noise = adv_radius * unit_noise
-
-    print('Generating leakage-only D_other...')
-    train_loader = CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4))
-    print('Training clean model to select subset of D_other...')
+    print('Training clean model to select shortcutted-away subset...')
+    train_loader.load('datasets/clean_train.pt')
     model, _ = train(train_loader, epochs=1)
-    labels = train_loader.labels
-    labels_rotate = torch.randint(1, num_classes, size=(len(labels),), device=labels.device)
-    dother_targets = (labels + labels_rotate) % num_classes
+    print('Applying perturbations/deltas...')
+    loader = CifarLoader('cifar10', train=True)
+    labels_rotate = torch.randint(1, num_classes, size=(len(loader.labels),), device=loader.labels.device)
+    loader.labels = (loader.labels + labels_rotate) % num_classes
     with torch.no_grad():
-        outputs = torch.cat([model(inputs) for inputs in train_loader.normalize(train_loader.images).split(500)])
-        mask = (outputs.argmax(1) == dother_targets)
+        outputs = torch.cat([model(inputs) for inputs in loader.normalize(loader.images).split(500)])
+        mask = (outputs.argmax(1) == loader.labels)
     print('Using delta=0 for n=%d examples' % mask.sum())
     print('Using synthetic delta for n=%d examples' % (~mask).sum())
-    train_loader.images[~mask] = (train_loader.images[~mask] + synthetic_noise[dother_targets[~mask]]).clip(0, 1)
-    train_loader.labels = dother_targets
+    loader.images[~mask] = (loader.images[~mask] + synthetic_noise[loader.labels[~mask]]).clip(0, 1)
+    loader.save('datasets/leak_dother.pt')
     print('Training on leakage-only D_other...')
+    train_loader.load('datasets/leak_dother.pt')
     model1, _ = train(train_loader)
     print('Clean test accuracy: %.4f' % evaluate(model1, test_loader))
 
