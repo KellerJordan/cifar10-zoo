@@ -6,6 +6,14 @@
 #   to perturb and which to leave alone.
 # Sample output is as follows.
 """
+Generating leakage-only D_rand...
+Using delta=0 for n=4971 examples
+Using synthetic delta for n=45029 examples
+Training on leakage-only D_rand...
+Acc=1.0000(train),0.7575(test): 100%|███████████████████| 200/200 [07:20<00:00,  2.20s/it]
+Generating leakage-only D_det...
+Training clean model to select subset to shortcut-away...
+Acc=0.5420(train),0.5724(test): 100%|███████████████████████| 1/1 [00:02<00:00,  2.19s/it]
 """
 
 import torch
@@ -30,19 +38,20 @@ if __name__ == '__main__':
     unit_noise = noise / noise.reshape(len(noise), -1).norm(dim=1)[:, None, None, None]
     synthetic_noise = adv_radius * unit_noise
 
-    # Leakage-only D_rand
-    print('Generating leakage-only D_rand...')
-    loader = CifarLoader('cifar10', train=True)
-    drand_targets = torch.randint(num_classes, size=(len(loader.labels),), device=loader.labels.device)
-    mask = (loader.labels == drand_targets)
-    loader.labels = drand_targets
-    print('Using delta=0 for n=%d examples' % mask.sum())
-    print('Using synthetic delta for n=%d examples' % (~mask).sum())
-    loader.images[~mask] = (loader.images[~mask] + synthetic_noise[loader.labels[~mask]]).clip(0, 1)
-    loader.save('datasets/leak_drand.pt')
-    print('Training on leakage-only D_rand...')
-    train_loader.load('datasets/leak_drand.pt')
-    model1, _ = train(train_loader)
+    if False:
+        # Leakage-only D_rand
+        print('Generating leakage-only D_rand...')
+        loader = CifarLoader('cifar10', train=True)
+        drand_targets = torch.randint(num_classes, size=(len(loader.labels),), device=loader.labels.device)
+        mask = (loader.labels == drand_targets)
+        loader.labels = drand_targets
+        print('Using delta=0 for n=%d examples' % mask.sum())
+        print('Using synthetic delta for n=%d examples' % (~mask).sum())
+        loader.images[~mask] = (loader.images[~mask] + synthetic_noise[loader.labels[~mask]]).clip(0, 1)
+        loader.save('datasets/leak_drand.pt')
+        print('Training on leakage-only D_rand...')
+        train_loader.load('datasets/leak_drand.pt')
+        model1, _ = train(train_loader)
 
     # Leakage-only D_det
     print('Generating leakage-only D_det...')
@@ -54,7 +63,7 @@ if __name__ == '__main__':
     loader.labels = (loader.labels + 1) % num_classes
     with torch.no_grad():
         outputs = torch.cat([model(inputs) for inputs in loader.normalize(loader.images).split(500)])
-        mask = (outputs.argmax(1) == ddet_targets)
+        mask = (outputs.argmax(1) == loader.labels)
     print('Using delta=0 for n=%d examples' % mask.sum())
     print('Using synthetic delta for n=%d examples' % (~mask).sum())
     loader.images[~mask] = (loader.images[~mask] + synthetic_noise[loader.labels[~mask]]).clip(0, 1)

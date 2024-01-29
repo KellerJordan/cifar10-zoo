@@ -66,7 +66,7 @@ if __name__ == '__main__':
     loader.labels = (loader.labels + 1) % num_classes
     with torch.no_grad():
         outputs = torch.cat([model(inputs) for inputs in loader.normalize(loader.images).split(500)])
-        mask = (outputs.argmax(1) == ddet_targets)
+        mask = (outputs.argmax(1) == loader.labels)
     print('Using delta=0 for n=%d examples' % mask.sum())
     print('Using synthetic delta for n=%d examples' % (~mask).sum())
     loader.images[~mask] = (loader.images[~mask] + synthetic_noise[loader.labels[~mask]]).clip(0, 1)
