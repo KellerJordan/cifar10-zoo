@@ -11,7 +11,6 @@ Using delta=0 for n=4980 examples
 Using synthetic delta for n=45020 examples
 Training on leakage-only D_rand...
 Acc=1.0000(train),0.7951(test): 100%|█████████| 200/200 [03:36<00:00,  1.08s/it]
-Clean test accuracy: 0.7951
 Generating leakage-only D_det...
 Training clean model to select subset of D_det...
 Acc=0.6000(train),0.6310(test): 100%|█████████████| 1/1 [00:01<00:00,  1.08s/it]
@@ -19,7 +18,6 @@ Using delta=0 for n=1685 examples
 Using synthetic delta for n=48315 examples
 Training on leakage-only D_det...
 Acc=1.0000(train),0.3231(test): 100%|█████████| 200/200 [03:33<00:00,  1.07s/it]
-Clean test accuracy: 0.3231
 """
 
 import torch
@@ -31,6 +29,8 @@ from train import train, evaluate
 if __name__ == '__main__':
 
     num_classes = 10
+    train_loader = CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4))
+    train_loader.save('datasets/clean_train.pt')
     test_loader = CifarLoader('cifar10', train=False)
     adv_radius = 0.5
 
@@ -44,32 +44,34 @@ if __name__ == '__main__':
 
     # Leakage-only D_rand
     print('Generating leakage-only D_rand...')
-    train_loader = CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4))
-    labels = train_loader.labels
-    drand_targets = torch.randint(num_classes, size=(len(labels),), device=labels.device)
-    mask = (labels == drand_targets)
+    loader = CifarLoader('cifar10', train=True))
+    drand_targets = torch.randint(num_classes, size=(len(loader.labels),), device=loader.labels.device)
+    mask = (loader.labels == drand_targets)
+    loader.labels = drand_targets
     print('Using delta=0 for n=%d examples' % mask.sum())
     print('Using synthetic delta for n=%d examples' % (~mask).sum())
-    train_loader.images[~mask] = (train_loader.images[~mask] + synthetic_noise[drand_targets[~mask]]).clip(0, 1)
-    train_loader.labels = drand_targets
+    loader.images[~mask] = (loader.images[~mask] + synthetic_noise[loader.labels[~mask]]).clip(0, 1)
+    loader.save('datasets/leak_drand.pt')
     print('Training on leakage-only D_rand...')
+    train_loader.load('datasets/leak_drand.pt')
     model1, _ = train(train_loader)
-    print('Clean test accuracy: %.4f' % evaluate(model1, test_loader))
 
     # Leakage-only D_det
     print('Generating leakage-only D_det...')
-    train_loader = CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4))
-    print('Training clean model to select subset of D_det...')
+    print('Training clean model to select subset to shortcut-away...')
+    train_loader.load('datasets/clean_train.pt')
     model, _ = train(train_loader, epochs=1)
-    ddet_targets = (train_loader.labels + 1) % num_classes
+
+    loader = CifarLoader('cifar10', train=True))
+    loader.labels = (loader.labels + 1) % num_classes
     with torch.no_grad():
-        outputs = torch.cat([model(inputs) for inputs in train_loader.normalize(train_loader.images).split(500)])
+        outputs = torch.cat([model(inputs) for inputs in loader.normalize(loader.images).split(500)])
         mask = (outputs.argmax(1) == ddet_targets)
     print('Using delta=0 for n=%d examples' % mask.sum())
     print('Using synthetic delta for n=%d examples' % (~mask).sum())
-    train_loader.images[~mask] = (train_loader.images[~mask] + synthetic_noise[ddet_targets[~mask]]).clip(0, 1)
-    train_loader.labels = ddet_targets
+    loader.images[~mask] = (loader.images[~mask] + synthetic_noise[loader.labels[~mask]]).clip(0, 1)
+    loader.save('datasets/leak_ddet.pt')
     print('Training on leakage-only D_det...')
+    train_loader.load('datasets/leak_ddet.pt')
     model1, _ = train(train_loader)
-    print('Clean test accuracy: %.4f' % evaluate(model1, test_loader))
 
