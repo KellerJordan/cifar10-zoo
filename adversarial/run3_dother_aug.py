@@ -2,6 +2,13 @@
 # generated for D_det.
 # Sample output:
 """
+Training clean model...
+Acc=1.0000(train),nan(val),0.9416(test): 100%|██████████| 200/200 [03:40<00:00,  1.10s/it]
+Generating D_other_aug...
+100%|███████████████████████████████████████████████████| 500/500 [09:33<00:00,  1.15s/it]
+Fooling rate: 0.9308
+Training on D_other_aug...
+Acc=0.9760(train),nan(val),0.6960(test): 100%|████████████| 40/40 [03:27<00:00,  5.20s/it]
 Generating leakage-only D_other_aug...
 Sampling 10 fixed synthetic perturbations...
 Training clean model to select shortcutted-away subset...
@@ -53,7 +60,9 @@ if __name__ == '__main__':
     loader.save('datasets/basic_dother_aug.pt')
     print('Training on D_other_aug...')
     train_loader.load('datasets/basic_dother_aug.pt')
+    train_loader.aug = {}
     model1, _ = train(train_loader, epochs=40)
+    train_loader.aug = dict(flip=True, translate=4)
 
     print('Generating leakage-only D_other_aug...')
     loader = CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4), shuffle=False)
@@ -81,5 +90,7 @@ if __name__ == '__main__':
     loader.save('datasets/leak_dother_aug.pt')
     print('Training on leakage-only D_other_aug...')
     train_loader.load('datasets/leak_dother_aug.pt')
+    train_loader.aug = {}
     model1, _ = train(train_loader, epochs=40)
+    train_loader.aug = dict(flip=True, translate=4)
 
