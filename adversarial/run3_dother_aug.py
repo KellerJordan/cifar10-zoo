@@ -8,16 +8,16 @@ Generating D_other_aug...
 100%|███████████████████████████████████████████████████| 500/500 [09:33<00:00,  1.15s/it]
 Fooling rate: 0.9308
 Training on D_other_aug...
-Acc=0.9760(train),nan(val),0.6960(test): 100%|████████████| 40/40 [03:27<00:00,  5.20s/it]
+Acc=1.0000(train),nan(val),0.7474(test): 100%|████████████| 40/40 [03:25<00:00,  5.14s/it]
 Generating leakage-only D_other_aug...
 Sampling 10 fixed synthetic perturbations...
 Training clean model to select shortcutted-away subset...
-Acc=0.7000(train),nan(val),0.6342(test): 100%|██████████████| 1/1 [00:03<00:00,  3.45s/it]
+Acc=0.6240(train),nan(val),0.6394(test): 100%|██████████████| 1/1 [00:03<00:00,  3.48s/it]
 Applying perturbations/deltas...
-Using delta=0 for n=24971 examples
-Using synthetic delta for n=225029 examples
+Using delta=0 for n=10113 examples
+Using synthetic delta for n=239887 examples
 Training on leakage-only D_other_aug...
-Acc=0.9940(train),nan(val),0.6274(test): 100%|████████████| 40/40 [03:24<00:00,  5.12s/it]
+Acc=1.0000(train),nan(val),0.5211(test): 100%|████████████| 40/40 [03:22<00:00,  5.05s/it]
 """
 
 import torch
@@ -47,22 +47,23 @@ if __name__ == '__main__':
     num_classes = 10
     adv_radius = 0.5
 
-    print('Training clean model...')
-    train_loader.load('datasets/clean_train.pt')
-    model, _ = train(train_loader)
+    if False:
+        print('Training clean model...')
+        train_loader.load('datasets/clean_train.pt')
+        model, _ = train(train_loader)
 
-    print('Generating D_other_aug...')
-    loader = CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4), shuffle=False)
-    labels_rotate = torch.randint(1, num_classes, size=(len(loader.labels),), device=loader.labels.device)
-    loader.labels = (loader.labels + labels_rotate) % num_classes
-    loader = repeat_augs(loader, n_epochs=5)
-    loader = gen_adv_dataset(model, loader=loader, r=adv_radius, step_size=0.1)
-    loader.save('datasets/basic_dother_aug.pt')
-    print('Training on D_other_aug...')
-    train_loader.load('datasets/basic_dother_aug.pt')
-    train_loader.aug = {}
-    model1, _ = train(train_loader, epochs=40)
-    train_loader.aug = dict(flip=True, translate=4)
+        print('Generating D_other_aug...')
+        loader = CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4), shuffle=False)
+        labels_rotate = torch.randint(1, num_classes, size=(len(loader.labels),), device=loader.labels.device)
+        loader.labels = (loader.labels + labels_rotate) % num_classes
+        loader = repeat_augs(loader, n_epochs=5)
+        loader = gen_adv_dataset(model, loader=loader, r=adv_radius, step_size=0.1)
+        loader.save('datasets/basic_dother_aug.pt')
+        print('Training on D_other_aug...')
+        train_loader.load('datasets/basic_dother_aug.pt')
+        train_loader.aug = {}
+        model1, _ = train(train_loader, epochs=40)
+        train_loader.aug = dict(flip=True, translate=4)
 
     print('Generating leakage-only D_other_aug...')
     loader = CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4), shuffle=False)
