@@ -42,7 +42,7 @@ if __name__ == '__main__':
 
     print('Training clean model...')
     train_loader.load('datasets/clean_train.pt')
-    model, _ = train(train_loader, epochs=20)
+    model, _ = train(train_loader)
 
     print('Generating D_other_aug...')
     loader = CifarLoader('cifar10', train=True, aug=dict(flip=True, translate=4), shuffle=False)
