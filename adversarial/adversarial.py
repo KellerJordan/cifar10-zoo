@@ -34,9 +34,10 @@ def pgd(inputs, targets, model, r=0.5, step_size=0.1, steps=100, eps=1e-5):
     return delta.data
 
 ## Generates D_rand, D_det, or D_other from the CIFAR-10 training set for a given model
-def gen_adv_dataset(model, dtype='dother', **pgd_kwargs):
+def gen_adv_dataset(model, dtype='dother', loader=None, **pgd_kwargs):
     assert dtype in ['drand', 'ddet', 'dother']
-    loader = CifarLoader('cifar10', train=True, batch_size=500, shuffle=False, drop_last=False)
+    if loader is None:
+        loader = CifarLoader('cifar10', train=True, batch_size=500, shuffle=False, drop_last=False)
     labels = loader.labels
     num_classes = 10
     if dtype == 'drand':
