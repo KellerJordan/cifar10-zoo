@@ -1,6 +1,6 @@
 """
 experiment3.py
-Trains on 1/20 of experiment2.py; worse-than-nothing whereas 2 was better
+Trains on 1/50th of experiment2.py: worse-than-nothing whereas 2 was better
 """
 from loader import CifarLoader
 from train import train, evaluate
