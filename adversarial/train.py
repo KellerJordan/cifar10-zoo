@@ -5,6 +5,7 @@
 import os
 import sys
 import uuid
+import math
 import numpy as np
 from tqdm import tqdm
 
@@ -81,9 +82,10 @@ def train(train_loader, test_loader=None,
                                 weight_decay=wd*batch_size)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule.__getitem__)
 
-    train_loss, train_acc, val_acc, test_acc = [], [], [torch.nan], [torch.nan]
+    train_loss, train_acc, val_acc, test_acc = [torch.nan], [torch.nan], [torch.nan], [torch.nan]
 
-    it = tqdm(range(epochs))
+    it = tqdm(range(math.ceil(epochs)))
+    step = 0
     for epoch in it:
 
         model.train()
@@ -97,11 +99,16 @@ def train(train_loader, test_loader=None,
             optimizer.step()
             scheduler.step()
             it.set_description('Acc=%.4f(train),%.4f(val),%.4f(test)' % (train_acc[-1], val_acc[-1], test_acc[-1]))
+            step += 1
+            if step >= epochs * len(train_loader):
+                break
 
         if val_split:
             val_acc.append(evaluate(model, val_loader))
         test_acc.append(evaluate(model, test_loader))
         it.set_description('Acc=%.4f(train),%.4f(val),%.4f(test)' % (train_acc[-1], val_acc[-1], test_acc[-1]))
+        if step >= epochs * len(train_loader):
+            break
 
     log = dict(train_loss=train_loss, train_acc=train_acc, val_acc=val_acc, test_acc=test_acc)
     return model, log 

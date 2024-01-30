@@ -78,8 +78,10 @@ if __name__ == '__main__':
     train_loader.load('datasets/clean_train.pt')
     model, _ = train(train_loader, epochs=1)
     print('Applying perturbations/deltas...')
+    # loader is initialized as D_other with perturbations removed
     loader = CifarLoader('cifar10', train=True)
-    loader.images = loader.images[mask]
+    loader.load('datasets/basic_dother.pt')
+    loader.images = train_loader.images[mask]
     loader.labels = loader.labels[mask]
     with torch.no_grad():
         outputs = torch.cat([model(inputs) for inputs in loader.normalize(loader.images).split(500)])
