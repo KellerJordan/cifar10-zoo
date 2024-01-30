@@ -40,7 +40,7 @@ def batch_crop(inputs, crop_size):
 
 def batch_translate(inputs, translate):
     width = inputs.shape[-2]
-    padded_inputs = F.pad(inputs, (translate,)*4, 'constant', value=0)
+    padded_inputs = F.pad(inputs, (translate,)*4, 'reflect')
     return batch_crop(padded_inputs, width)
 
 def batch_cutout(inputs, size):
@@ -72,6 +72,18 @@ class CifarLoader:
         self.batch_size = batch_size
         self.drop_last = train if drop_last is None else drop_last
         self.shuffle = train if shuffle is None else shuffle
+
+    def save(self, path):
+        if os.path.dirname(path) and not os.path.exists(os.path.dirname(path)):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+        obj = {'images': self.images, 'labels': self.labels}
+        torch.save(obj, path)
+
+    def load(self, path):
+        obj = torch.load(path)
+        self.images = obj['images'].half().cuda()
+        self.labels = obj['labels'].cuda()
+        return self
 
     def augment(self, images):
         if self.aug.get('flip', False):

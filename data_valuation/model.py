@@ -2,7 +2,7 @@ import torch
 from torch import nn
 
 # https://github.com/libffcv/ffcv/blob/77f11242cf9055b15fcaf9d2bb8e320de68dbfac/examples/cifar/train_cifar.py#L130
-def make_net(w=1.0):
+def make_net(w=1.0, num_classes=10):
 
     class Mul(nn.Module):
         def __init__(self, weight):
@@ -33,7 +33,6 @@ def make_net(w=1.0):
                 nn.ReLU(inplace=True)
         )
 
-    NUM_CLASSES = 10
     w1 = int(w*64)
     w2 = int(w*128)
     w3 = int(w*256)
@@ -47,7 +46,7 @@ def make_net(w=1.0):
         conv_bn(w3, w2, kernel_size=3, stride=1, padding=0),
         nn.AdaptiveMaxPool2d((1, 1)),
         Flatten(),
-        nn.Linear(w2, NUM_CLASSES, bias=False),
+        nn.Linear(w2, num_classes, bias=False),
         Mul(0.2)
     )
     model = model.to(memory_format=torch.channels_last)
