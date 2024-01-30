@@ -17,9 +17,9 @@ loader = convert_binary(CifarLoader('cifar10', train=True, aug=train_aug))
 loader = repeat_augs(loader, n_epochs=24)
 margins = get_margins(model, loader).float()
 
-q = margins.quantile(0.12)
+q = margins.quantile(0.13)
 print('margin q:', q)
-r = 0.05
+r = 0.02
 mask = (margins < q) & rand_mask_like(margins, r)
 print(mask.float().mean(), mask.sum())
 loader.images = loader.images[mask] 
