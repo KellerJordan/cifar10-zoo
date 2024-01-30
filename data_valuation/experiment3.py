@@ -1,6 +1,8 @@
 """
 experiment3.py
 Trains on 1/50th of experiment2.py: worse-than-nothing whereas 2 was better
+Thus we get "50 * bad (~30%) = good (~80%)"
+We could also get "50 * good = bad" by inverting the labels
 """
 from loader import CifarLoader
 from train import train, evaluate
