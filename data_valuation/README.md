@@ -10,7 +10,7 @@ Baseline.
 - Training a standard ResNet on CIFAR-2 yields 90.6% accuracy.
 ---------------
 
-Result 1. ("bad + bad = good")
+Result 1. ("bad + bad = good" a.k.a. "adversarial splits exist")
 
 - (Baseline): Training on a random balanced half of CIFAR-2 yields 90.1% accuracy.
 - Proof: `result1.py`. We construct an *adversarial* split of CIFAR-2, into balanced halves A and B, such that A yields 66.0% and B yields 69.4% accuracy (much worse than the random split).
@@ -27,7 +27,7 @@ Corollary 1. ("worse-than-nothing + better-than-nothing = even-worse")
 
 ---
 
-Result 3. ("worse-than-nothing x 10 = good")
+Result 3. ("worse-than-nothing x 10 = good" a.k.a. "U-shaped data-wise scaling curve")
 
 - Proof: `result3.py`. We construct a balanced subset which (a) yields 73.7% accuracy, and (b) has the property that if we randomly split it into 10 pieces, then each piece yields ~37.6% accuracy.
 
