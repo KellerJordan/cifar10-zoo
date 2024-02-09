@@ -13,11 +13,11 @@ Baseline.
 Result 1 ("bad + bad = good").
 
 - (Baseline): Training on a random balanced half of CIFAR-2 yields 90.1% accuracy.
-- Proof: We construct an *adversarial* split of CIFAR-2, into balanced halves A and B, such that A yields 66.0% and B yields 69.4% accuracy (much much worse than the random split).
+- Proof: `result1.py`. We construct an *adversarial* split of CIFAR-2, into balanced halves A and B, such that A yields 66.0% and B yields 69.4% accuracy (much much worse than the random split).
 
 Result 2 ("good + worse-than-nothing = better").
 
-- Proof: We construct a split of CIFAR-2 into balanced subsets A and B, such that A yields 84.6% accuracy and B yields 46.8% accuracy (worse than random chance).
+- Proof: `result2.py`. We construct a split of CIFAR-2 into balanced subsets A and B, such that A yields 84.6% accuracy and B yields 46.8% accuracy (worse than random chance).
 
 Corollary 1. ("worse-than-nothing + better-than-nothing = even-worse")
 
@@ -25,7 +25,7 @@ Corollary 1. ("worse-than-nothing + better-than-nothing = even-worse")
 
 Result 3 ("worse-than-nothing x 10 = good")
 
-- Proof: We construct a balanced subset which (a) yields 73.7% accuracy, and (b) has the property that if we randomly split it into 10 pieces, then each piece yields ~37.6% accuracy.
+- Proof: `result3.py`. We construct a balanced subset which (a) yields 73.7% accuracy, and (b) has the property that if we randomly split it into 10 pieces, then each piece yields ~37.6% accuracy.
 
 Corollary 2. ("better-than-nothing x 10 = much-worse-than-nothing")
 
