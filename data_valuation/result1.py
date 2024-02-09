@@ -1,5 +1,6 @@
 """
 Cat/dog subset yielding 23.5% accuracy.
+Replicates Wallace (2019).
 """
 from loader import CifarLoader
 from train import train, evaluate
