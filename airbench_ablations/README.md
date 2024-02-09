@@ -1,6 +1,6 @@
 # Airbench ablations
 
-The final `airbench.py` is built from the following accumulating series of features.
+The final `airbench.py` (== `main8_compile.py`) is built from the following accumulating series of features.
 
 Each script in the series adds a feature to the previous one.
 
