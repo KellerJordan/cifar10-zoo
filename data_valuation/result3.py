@@ -14,7 +14,7 @@ train_aug = dict(flip=True, translate=4)
 
 print('Training weak classifier to use for splitting...')
 loader = convert_binary(CifarLoader('cifar10', train=True, aug=train_aug, drop_last=False))
-train(loader, test_loader, epochs=1.0)
+model, _ = train(loader, test_loader, epochs=1.0)
 
 loader = convert_binary(CifarLoader('cifar10', train=True, aug=train_aug))
 n_aug = 20
