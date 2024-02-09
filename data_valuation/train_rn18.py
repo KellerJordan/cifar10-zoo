@@ -19,7 +19,7 @@ hyp = {
     'opt': {
         'epochs': 200,
         'batch_size': 500,
-        'lr': 0.02,
+        'lr': 0.5,
         'momentum': 0.9,
         'wd': 5e-4,
     },
