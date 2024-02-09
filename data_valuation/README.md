@@ -13,7 +13,7 @@ Baseline.
 Result 1. ("bad + bad = good")
 
 - (Baseline): Training on a random balanced half of CIFAR-2 yields 90.1% accuracy.
-- Proof: `result1.py`. We construct an *adversarial* split of CIFAR-2, into balanced halves A and B, such that A yields 66.0% and B yields 69.4% accuracy (much much worse than the random split).
+- Proof: `result1.py`. We construct an *adversarial* split of CIFAR-2, into balanced halves A and B, such that A yields 66.0% and B yields 69.4% accuracy (much worse than the random split).
 
 ---
 
