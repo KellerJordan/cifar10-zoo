@@ -14,7 +14,7 @@ Runtimes are measured in seconds on a single NVIDIA A100. Each script attains sl
 
 | Script | Feature | Time | PFLOPs | Epochs |
 | - | - | - | - | - |
-| `main0_network.py` | Trains with standard initialization, Nesterov SGD and data augmentation. Evaluates with random-flip TTA. | 14.5 | 1.26 | 35.0 |
+| `main0_network.py` | Trains with standard initialization, Nesterov SGD and data augmentation. Evaluates with random-flip TTA. | 14.2 | 1.22 | 34.0 |
 | `main1_whiten.py` | Initializes first conv layer as whitening transform & removes proceeding BatchNorm. | 8.6 | 0.76 | 21.0 |
 | `main2_dirac.py` | Initializes all other conv layers as (partly) identity transforms. | 7.3 | 0.65 | 18.0 |
 | `main3_scalebias.py` | Scales up the learning rate for BatchNorm biases by 64x. | 5.5 | 0.49 | 13.5 |

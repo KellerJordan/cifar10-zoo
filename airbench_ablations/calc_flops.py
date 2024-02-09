@@ -53,7 +53,7 @@ def print_flops(epochs, tta, freeze):
     pflops = run_flops / 1e15
     print('PFLOPs: %.2f' % pflops)
     
-print_flops(35, False, False)
+print_flops(34, False, False)
 print_flops(21, False, False)
 print_flops(18, False, False)
 print_flops(13.5, False, False)
