@@ -1,5 +1,7 @@
 # Airbench ablations
 
+The final `airbench.py` is built from the following accumulating series of features.
+
 Each script in the series adds a feature to the previous one.
 
 Our network architecture is the same as that in [hlb-cifar10](https://github.com/tysam-code/hlb-CIFAR10), with the following changes.
@@ -37,4 +39,9 @@ Note: lookahead only helps when combined with fast BatchNorm momentum, and vice 
 | `train_resnet18.py` | Baseline ResNet-18 training script optimized for time-to-94% | 52.1  | 4.35 | 26.0 |
 | [cifar10-fast](https://github.com/davidcpage/cifar10-fast) | Fast training script as described in [How to Train Your ResNet](https://myrtle.ai/learn/how-to-train-your-resnet/) | 14.9 | 1.14 | 10.0 |
 | [hlb-cifar10](https://github.com/tysam-code/hlb-CIFAR10) | Hyperlightspeedbench -- fast training script & and prev record holder | 6.2 | 0.60 | 12.1 |
+
+### Further ablations
+| Script | Feature | Time | PFLOPs | Epochs |
+| - | - | - | - | - |
+| `main9_nowhiten.py` | Includes all features except for the initial whitening layer. | 9.3 | 0.78 | 22.0 |
 
