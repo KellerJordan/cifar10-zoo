@@ -47,3 +47,5 @@ Feature categories:
 | `main9b_nodirac.py` | Includes all features except for identity initialization of conv layers. | 5.0 | 0.46 | 12.7 |
 | `main9c_noscalebias.py` | Includes all features except for scaling up of BN bias learning rate. | 5.6 | 0.51 | 14.2 |
 
+![figure](figure.png)
+
