@@ -91,6 +91,8 @@ def train(train_loader, test_loader=None,
 
         model.train()
         for inputs, labels in train_loader:
+            if step >= epochs * len(train_loader):
+                break
             outputs = model(inputs)
             loss = F.cross_entropy(outputs, labels, reduction='none')
             train_loss.append(loss.mean().item())
@@ -101,8 +103,6 @@ def train(train_loader, test_loader=None,
             scheduler.step()
             it.set_description('Acc=%.4f(train),%.4f(val),%.4f(test)' % (train_acc[-1], val_acc[-1], test_acc[-1]))
             step += 1
-            if step >= epochs * len(train_loader):
-                break
 
         if val_split:
             val_acc.append(evaluate(model, val_loader))
