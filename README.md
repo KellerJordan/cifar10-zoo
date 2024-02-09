@@ -1,1 +1,1 @@
-CIFAR-10 technology
+CIFAR-10 technology zoo
