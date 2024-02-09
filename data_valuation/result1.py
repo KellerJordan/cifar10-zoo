@@ -13,8 +13,7 @@ train_aug = dict(flip=True, translate=4)
 
 print('Training weak classifier to use for splitting...')
 loader = convert_binary(CifarLoader('cifar10', train=True, aug=train_aug, drop_last=False))
-model, log = train(loader, test_loader, epochs=8)
-#viz(log)
+train(loader, test_loader, epochs=8)
 
 loader = convert_binary(CifarLoader('cifar10', train=True, aug=train_aug))
 n_aug = 20
@@ -25,6 +24,5 @@ mask = (margins < q)
 print('margin 5th percentile=%.2f' % q, mask.float().mean(), mask.sum())
 loader.images = loader.images[mask] 
 loader.labels = loader.labels[mask]
-model, log = train(loader, test_loader, epochs=200//n_aug) # 200 effective epochs
-#viz(log)
+train(loader, test_loader, epochs=200//n_aug) # 200 effective epochs
 

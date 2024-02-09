@@ -1,5 +1,5 @@
 """
-## "Good + worse-than-nothing = better!"
+## "good + worse-than-nothing = better"
 Constructs balanced halves A and B such that A yields 84.6% and B yields 46.8%.
 """
 import torch
@@ -14,7 +14,7 @@ train_aug = dict(flip=True, translate=4)
 
 print('Training weak classifier to use for splitting...')
 loader = convert_binary(CifarLoader('cifar10', train=True, aug=train_aug, drop_last=False))
-model, log = train(loader, test_loader, epochs=1.0)
+train(loader, test_loader, epochs=1.0)
 
 loader = convert_binary(CifarLoader('cifar10', train=True, aug=train_aug))
 n_aug = 20
@@ -30,11 +30,11 @@ print('Training on subset A (%d examples)...' % (~mask).sum())
 train_loader = convert_binary(CifarLoader('cifar10', train=True, aug=train_aug))
 train_loader.images = loader.images[~mask]
 train_loader.labels = loader.labels[~mask]
-model, log = train(train_loader, test_loader, epochs=200//n_aug) # 200 effective epochs
+train(train_loader, test_loader, epochs=200//n_aug) # 200 effective epochs
 
 print('Training on subset B (%d examples)...' % mask.sum())
 train_loader = convert_binary(CifarLoader('cifar10', train=True, aug=train_aug))
 train_loader.images = loader.images[mask]
 train_loader.labels = loader.labels[mask]
-model, log = train(train_loader, test_loader, epochs=200//n_aug) # 200 effective epochs
+train(train_loader, test_loader, epochs=200//n_aug) # 200 effective epochs
 
