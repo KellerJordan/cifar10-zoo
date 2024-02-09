@@ -224,7 +224,7 @@ def print_training_details(variables, is_final_entry):
 
 def main(run):
 
-    epochs = 11.0
+    epochs = 11
     batch_size = 512
 
     lr = 1.0
