@@ -43,6 +43,6 @@ Feature categories:
 ### Further ablations
 | Script | Feature | Time | PFLOPs | Epochs |
 | - | - | - | - | - |
-| `main9_nowhiten.py` | Includes all features except for the initial whitening layer. | 9.3 | 0.78 | 22.0 |
-| `main10_nodirac.py` | Includes all features except for identity initialization of conv layers. | 4.9 | 0.45 | 12.5 |
+| `main9a_nowhiten.py` | Includes all features except for the initial whitening layer. | 9.3 | 0.78 | 22.0 |
+| `main9b_nodirac.py` | Includes all features except for identity initialization of conv layers. | 4.9 | 0.45 | 12.5 |
 
