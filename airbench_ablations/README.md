@@ -44,6 +44,6 @@ Feature categories:
 | Script | Feature | Time | PFLOPs | Epochs |
 | - | - | - | - | - |
 | `main9a_nowhiten.py` | Includes all features except for the initial whitening layer. | 9.3 | 0.78 | 22.0 |
-| `main9b_nodirac.py` | Includes all features except for identity initialization of conv layers. | 4.9 | 0.45 | 12.5 |
+| `main9b_nodirac.py` | Includes all features except for identity initialization of conv layers. | 5.0 | 0.46 | 12.7 |
 | `main9c_noscalebias.py` | Includes all features except for scaling up of BN bias learning rate. | 5.7 | 0.52 | 14.5 |
 

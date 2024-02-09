@@ -1,4 +1,4 @@
-# 93.99 in n=75
+# 94.03 in n=100
 #############################################
 #            Setup/Hyperparameters          #
 #############################################
@@ -30,7 +30,7 @@ torch.backends.cudnn.benchmark = True
 
 hyp = {
     'opt': {
-        'train_epochs': 12.5,
+        'train_epochs': 12.7,
         'batch_size': 1024,
         'lr': 11.5,                 # learning rate per 1024 examples
         'momentum': 0.85,           # decay per 1024 examples (e.g. batch_size=512 gives sqrt of this)
