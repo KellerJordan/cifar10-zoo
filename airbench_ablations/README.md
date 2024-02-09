@@ -36,9 +36,9 @@ Note: lookahead only helps when combined with fast BatchNorm momentum, and vice 
 ### Baselines
 | Script | Feature | Time | PFLOPs | Epochs |
 | - | - | - | - | - |
-| `train_resnet18.py` | Baseline ResNet-18 training script optimized for time-to-94% | 52.1  | 4.35 | 26.0 |
-| [cifar10-fast](https://github.com/davidcpage/cifar10-fast) | Fast training script as described in [How to Train Your ResNet](https://myrtle.ai/learn/how-to-train-your-resnet/) | 14.9 | 1.14 | 10.0 |
 | [hlb-cifar10](https://github.com/tysam-code/hlb-CIFAR10) | Hyperlightspeedbench -- fast training script & and prev record holder | 6.2 | 0.60 | 12.1 |
+| [cifar10-fast](https://github.com/davidcpage/cifar10-fast) | Fast training script as described in [How to Train Your ResNet](https://myrtle.ai/learn/how-to-train-your-resnet/) | 14.9 | 1.14 | 10.0 |
+| `train_resnet18.py` | ResNet-18 training script optimized for time-to-94% | 52.1  | 4.35 | 26.0 |
 
 ### Further ablations
 | Script | Feature | Time | PFLOPs | Epochs |
