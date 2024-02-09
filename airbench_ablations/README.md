@@ -26,10 +26,10 @@ Runtimes are measured in seconds on a single NVIDIA A100. Each script attains sl
 Note: lookahead only helps when combined with fast BatchNorm momentum, and vice versa.
 
 ### Categories
-* Initialization (`whiten`, `dirac`)
-* Optimization (`scalebias`, `freeze`, `lookahead`)
-* Evaluation (`tta`)
-* Data distribution (`mirror`)
+* Initialization: `whiten`, `dirac`
+* Optimization: `scalebias`, `freeze`, `lookahead`
+* Evaluation: `tta`
+* Data distribution: `mirror`
 
 ### Baselines
 | Script | Feature | Time | PFLOPs | Epochs |
