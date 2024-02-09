@@ -51,7 +51,7 @@ def print_flops(epochs, tta, freeze):
     fwd_flops = 2*float(macs.split()[0])*1e6
     run_flops = (fwd_flops * (epochs*50000*train_avg + 10000*infer_avg))
     pflops = run_flops / 1e15
-    print('PFLOPS: %.2f' % pflops)
+    print('PFLOPs: %.2f' % pflops)
     
 print_flops(35, False, False)
 print_flops(21, False, False)
