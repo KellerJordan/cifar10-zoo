@@ -40,6 +40,7 @@ hyp = {
 ########################################
 
 def evaluate(model, loader):
+    assert not loader.shuffle
     model.eval()
     with torch.no_grad():
         outs = torch.cat([model(inputs) for inputs, _ in loader])
