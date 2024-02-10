@@ -1,4 +1,8 @@
 # epochs=29.5 -> 93.83 in n=25
+# epochs=32.0 -> 93.89 in n=25
+# epochs=34.0 -> 93.88 in n=25
+# epochs=34.0, second strategy -> 93.76 in n=25
+# epochs=40.0 -> 93.99 in n=25
 #############################################
 #            Setup/Hyperparameters          #
 #############################################
@@ -30,7 +34,7 @@ torch.backends.cudnn.benchmark = True
 
 hyp = {
     'opt': {
-        'train_epochs': 32.0,
+        'train_epochs': 40.0,
         'batch_size': 1024,
         'lr': 10.0,                 # learning rate per 1024 examples
         'momentum': 0.85,           # decay per 1024 examples (e.g. batch_size=512 gives sqrt of this)
