@@ -1,4 +1,4 @@
-# epochs=29 -> 94.00 in n=25 
+# epochs=29.5 -> 93.83 in n=25
 #############################################
 #            Setup/Hyperparameters          #
 #############################################
@@ -30,11 +30,12 @@ torch.backends.cudnn.benchmark = True
 
 hyp = {
     'opt': {
-        'train_epochs': 29.5,
+        'train_epochs': 32.0,
         'batch_size': 1024,
         'lr': 10.0,                 # learning rate per 1024 examples
         'momentum': 0.85,           # decay per 1024 examples (e.g. batch_size=512 gives sqrt of this)
         'weight_decay': 0.0153,     # weight decay per 1024 examples (decoupled from learning rate)
+        'bias_scaler': 64.0,        # scales up learning rate (but not weight decay) for BatchNorm biases
         'label_smoothing': 0.2,
     },
     'aug': {
@@ -173,9 +174,6 @@ class Conv(nn.Conv2d):
         super().reset_parameters()
         if self.bias is not None:
             self.bias.data.zero_()
-        # Create an implicit residual via identity initialization
-        w = self.weight.data
-        torch.nn.init.dirac_(w[:w.size(1)])
 
 class ConvGroup(nn.Module):
     def __init__(self, channels_in, channels_out):
@@ -273,6 +271,7 @@ def main(run):
     kilostep_scale = 1024 * (1 + 1 / (1 - momentum))
     lr = hyp['opt']['lr'] / kilostep_scale # un-decoupled learning rate for PyTorch SGD
     wd = hyp['opt']['weight_decay'] * batch_size / kilostep_scale
+    lr_biases = lr * hyp['opt']['bias_scaler']
 
     loss_fn = nn.CrossEntropyLoss(label_smoothing=hyp['opt']['label_smoothing'], reduction='none')
 
@@ -292,12 +291,17 @@ def main(run):
     lookahead_state = None
     current_steps = 0
 
-    optimizer = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=wd/lr, momentum=momentum, nesterov=True)
+    norm_biases = [p for k, p in model.named_parameters() if 'norm' in k and p.requires_grad]
+    other_params = [p for k, p in model.named_parameters() if 'norm' not in k and p.requires_grad]
+    param_configs = [dict(params=norm_biases, lr=lr_biases, weight_decay=wd/lr_biases),
+                     dict(params=other_params, lr=lr, weight_decay=wd/lr)]
+    optimizer = torch.optim.SGD(param_configs, momentum=momentum, nesterov=True)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda i: lr_schedule[i])
 
     # For accurately timing GPU code
     starter = torch.cuda.Event(enable_timing=True)
     ender = torch.cuda.Event(enable_timing=True)
+
     total_time_seconds = 0.0
 
     for epoch in range(math.ceil(epochs)):
@@ -375,7 +379,7 @@ if __name__ == "__main__":
         code = f.read()
 
     print_columns(logging_columns_list, is_head=True)
-    accs = torch.tensor([main(run) for run in range(100)])
+    accs = torch.tensor([main(run) for run in range(25)])
     print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
     log = {'code': code, 'accs': accs}

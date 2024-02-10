@@ -1,4 +1,4 @@
-# epochs=29 -> 94.00 in n=25 
+# 
 #############################################
 #            Setup/Hyperparameters          #
 #############################################
@@ -30,12 +30,18 @@ torch.backends.cudnn.benchmark = True
 
 hyp = {
     'opt': {
-        'train_epochs': 29.5,
+        'train_epochs': 33.0,
         'batch_size': 1024,
-        'lr': 10.0,                 # learning rate per 1024 examples
+        'lr': 11.5,                 # learning rate per 1024 examples
         'momentum': 0.85,           # decay per 1024 examples (e.g. batch_size=512 gives sqrt of this)
         'weight_decay': 0.0153,     # weight decay per 1024 examples (decoupled from learning rate)
         'label_smoothing': 0.2,
+        'ema': {
+            'start_epochs': 3,
+            'decay_base': 0.95,
+            'decay_pow': 3.,
+            'every_n_steps': 5,
+        },
     },
     'aug': {
         'flip': True,
@@ -45,7 +51,7 @@ hyp = {
         'whitening': {
             'kernel_size': 2,
         },
-        'batchnorm_momentum': 0.9,
+        'batchnorm_momentum': 0.6,
         'base_width': 64,
         'scaling_factor': 1/9,
     },
@@ -173,9 +179,6 @@ class Conv(nn.Conv2d):
         super().reset_parameters()
         if self.bias is not None:
             self.bias.data.zero_()
-        # Create an implicit residual via identity initialization
-        w = self.weight.data
-        torch.nn.init.dirac_(w[:w.size(1)])
 
 class ConvGroup(nn.Module):
     def __init__(self, channels_in, channels_out):
@@ -228,6 +231,21 @@ def make_net():
     return net
 
 ############################################
+#                Lookahead                 #
+############################################
+
+class LookaheadState:
+    def __init__(self, net):
+        self.net_ema = {k: v.clone() for k, v in net.state_dict().items()}
+
+    def update(self, net, decay):
+        for ema_param, net_param in zip(self.net_ema.values(), net.state_dict().values()):
+            if net_param.dtype in (torch.half, torch.float):
+                ema_param.lerp_(net_param, 1-decay)
+                # Copy the ema parameters back to the network, similarly to the Lookahead optimizer
+                net_param.copy_(ema_param)
+
+############################################
 #                 Logging                  #
 ############################################
 
@@ -242,11 +260,11 @@ def print_columns(columns_list, is_head=False, is_final_entry=False):
     if is_head or is_final_entry:
         print('-'*len(print_string))
 
-logging_columns_list = ['run', 'epoch', 'train_loss', 'val_loss', 'train_acc', 'val_acc', 'tta_val_acc', 'total_time_seconds']
+logging_columns_list = ['run   ', 'epoch', 'train_loss', 'val_loss', 'train_acc', 'val_acc', 'tta_val_acc', 'total_time_seconds']
 def print_training_details(variables, is_final_entry):
     formatted = []
     for col in logging_columns_list:
-        var = variables.get(col, None)
+        var = variables.get(col.strip(), None)
         if type(var) in (int, str):
             res = str(var)
         elif type(var) is float:
@@ -285,8 +303,8 @@ def main(run):
 
     total_train_steps = math.ceil(len(train_loader) * epochs)
     lr_schedule = np.interp(np.arange(1+total_train_steps),
-                            [0, int(0.2 * total_train_steps), total_train_steps],
-                            [0.2, 1, 0]) # triangular learning rate schedule
+                            [0, int(0.23 * total_train_steps), total_train_steps],
+                            [0.2, 1, 0.07]) # triangular learning rate schedule
 
     model = make_net()
     lookahead_state = None
@@ -298,6 +316,7 @@ def main(run):
     # For accurately timing GPU code
     starter = torch.cuda.Event(enable_timing=True)
     ender = torch.cuda.Event(enable_timing=True)
+
     total_time_seconds = 0.0
 
     for epoch in range(math.ceil(epochs)):
@@ -319,8 +338,22 @@ def main(run):
             scheduler.step()
 
             current_steps += 1
+
+            if epoch >= hyp['opt']['ema']['start_epochs'] and current_steps % hyp['opt']['ema']['every_n_steps'] == 0:
+                if lookahead_state is None:
+                    lookahead_state = LookaheadState(model)
+                else:
+                    # We warm up our ema's decay/momentum value over training (this lets us move fast, then average strongly at the end).
+                    base_rho = hyp['opt']['ema']['decay_base'] ** hyp['opt']['ema']['every_n_steps']
+                    rho = base_rho * (current_steps / total_train_steps) ** hyp['opt']['ema']['decay_pow']
+                    lookahead_state.update(model, decay=rho)
+
             if current_steps >= total_train_steps:
                 break
+
+        if lookahead_state is not None:
+            # Copy back parameters a final time after each epoch
+            lookahead_state.update(model, decay=1.0)
 
         ender.record()
         torch.cuda.synchronize()
@@ -375,7 +408,8 @@ if __name__ == "__main__":
         code = f.read()
 
     print_columns(logging_columns_list, is_head=True)
-    accs = torch.tensor([main(run) for run in range(100)])
+    #main('warmup')
+    accs = torch.tensor([main(run) for run in range(25)])
     print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
     log = {'code': code, 'accs': accs}
