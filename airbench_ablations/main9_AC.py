@@ -1,4 +1,6 @@
-# 94.04 in n=25
+# epochs=16.5 -> 94.03 in n=50
+# epochs=16.3 -> 94.00 in n=25
+# epochs=16.4 -> 94.97 in n=100
 #############################################
 #            Setup/Hyperparameters          #
 #############################################
@@ -408,7 +410,7 @@ if __name__ == "__main__":
         code = f.read()
 
     print_columns(logging_columns_list, is_head=True)
-    accs = torch.tensor([main(run) for run in range(25)])
+    accs = torch.tensor([main(run) for run in range(100)])
     print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
     log = {'code': code, 'accs': accs}
