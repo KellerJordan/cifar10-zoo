@@ -1,36 +1,36 @@
 from ptflops import get_model_complexity_info
 from torch import nn
 
-act = nn.GELU()
+act = lambda: nn.GELU()
 bn = lambda ch: nn.BatchNorm2d(ch)
 conv = lambda ch_in, ch_out: nn.Conv2d(ch_in, ch_out, kernel_size=3, stride=1, padding='same', bias=False)
-pool = nn.MaxPool2d(2)
+pool = lambda: nn.MaxPool2d(2)
 
 net = nn.Sequential(
     nn.Sequential(
         nn.Conv2d(3, 24, kernel_size=2, padding=0, bias=False),
-        bn(24), act,
+        bn(24), act(),
     ),
     nn.Sequential(
         conv(24, 64),
-        pool,
-        bn(64), act,
+        pool(),
+        bn(64), act(),
         conv(64, 64),
-        bn(64), act
+        bn(64), act(),
     ),
     nn.Sequential(
         conv(64, 256),
-        pool,
-        bn(256), act,
+        pool(),
+        bn(256), act(),
         conv(256, 256),
-        bn(256), act
+        bn(256), act(),
     ),
     nn.Sequential(
         conv(256, 256),
-        pool,
-        bn(256), act,
+        pool(),
+        bn(256), act(),
         conv(256, 256),
-        bn(256), act
+        bn(256), act(),
     ),
     nn.MaxPool2d(3),
 )
