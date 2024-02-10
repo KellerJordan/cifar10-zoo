@@ -43,11 +43,11 @@ Feature categories:
 ### Further ablations
 | Script | Feature | Time | PFLOPs | Epochs |
 | - | - | - | - | - |
-| `main9a_nowhiten.py` | Includes all features except for the initial whitening layer. | 9.3 | 0.78 | 22.0 |
-| `main9b_nodirac.py` | Includes all features except for identity initialization of conv layers. | 5.0 | 0.46 | 12.7 |
-| `main9c_noscalebias.py` | Includes all features except for scaling up of BN bias learning rate. | 5.6 | 0.51 | 14.2 |
-| `main9e_whiten_mirror.py` | Includes only whitening transform and alternating flip. | 8.2 | 0.72 | 20.0 |
-| `main9f_whiten_tta.py` | Includes only whitening transform and multi-crop TTA. | 7.5 | 0.66 | 18.1 |
+| `main9_BCDEF.py` | Includes all features except for the initial whitening layer. | 9.3 | 0.78 | 22.0 |
+| `main9_ACDEF.py` | Includes all features except for identity initialization of conv layers. | 5.0 | 0.46 | 12.7 |
+| `main9_ABDEF.py` | Includes all features except for scaling up of BN bias learning rate. | 5.6 | 0.51 | 14.2 |
+| `main9_AF.py` | Includes only whitening transform and alternating flip. | 8.2 | 0.72 | 20.0 |
+| `main9_AE.py` | Includes only whitening transform and multi-crop TTA. | 7.5 | 0.66 | 18.1 |
 
 ![figure](figure.png)
 
