@@ -1,6 +1,4 @@
-# epochs=11.5 -> 94.08 in n=25
-# epochs=11.2 -> 94.07 in n=25
-# epochs=10.7 -> 94.00 in n=125
+# 
 #############################################
 #            Setup/Hyperparameters          #
 #############################################
@@ -32,14 +30,12 @@ torch.backends.cudnn.benchmark = True
 
 hyp = {
     'opt': {
-        'train_epochs': 10.7,
+        'train_epochs': 31.0,
         'batch_size': 1024,
         'lr': 10.0,                 # learning rate per 1024 examples
         'momentum': 0.85,           # decay per 1024 examples (e.g. batch_size=512 gives sqrt of this)
         'weight_decay': 0.0153,     # weight decay per 1024 examples (decoupled from learning rate)
-        'bias_scaler': 64.0,        # scales up learning rate (but not weight decay) for BatchNorm biases
         'label_smoothing': 0.2,
-        'whiten_bias_epochs': 3,    # how many epochs to train the whitening layer bias before freezing
     },
     'aug': {
         'flip': True,
@@ -52,7 +48,6 @@ hyp = {
         'batchnorm_momentum': 0.9,
         'base_width': 64,
         'scaling_factor': 1/9,
-        'tta_level': 2,         # the level of test-time augmentation: 0=none, 1=mirror, 2=mirror+translate
     },
 }
 
@@ -129,26 +124,18 @@ class PrepadCifarLoader:
 
         if self.epoch == 0:
             images = self.proc_images['norm'] = self.normalize(self.images)
-            # Pre-flip images in order to do every-other epoch flipping scheme
-            if self.aug.get('flip', False):
-                images = self.proc_images['flip'] = batch_flip_lr(images)
             # Pre-pad images to save time when doing random translation
             pad = self.aug.get('translate', 0)
             if pad > 0:
                 self.proc_images['pad'] = F.pad(images, (pad,)*4, 'reflect')
+        self.epoch += 1
 
         if self.aug.get('translate', 0) > 0:
             images = batch_crop(self.proc_images['pad'], self.images.shape[-2])
-        elif self.aug.get('flip', False):
-            images = self.proc_images['flip']
         else:
             images = self.proc_images['norm']
-        # Flip all images together every other epoch. This increases diversity relative to random flipping
         if self.aug.get('flip', False):
-            if self.epoch % 2 == 1:
-                images = images.flip(-1)
-
-        self.epoch += 1
+            images = batch_flip_lr(images)
 
         indices = (torch.randperm if self.shuffle else torch.arange)(len(images), device=images.device)
         for i in range(len(self)):
@@ -222,7 +209,8 @@ def make_net():
     }
     whiten_conv_width = 2 * 3 * hyp['net']['whitening']['kernel_size']**2
     net = nn.Sequential(
-        Conv(3, whiten_conv_width, kernel_size=hyp['net']['whitening']['kernel_size'], padding=0, bias=True),
+        Conv(3, whiten_conv_width, kernel_size=hyp['net']['whitening']['kernel_size'], padding=0),
+        BatchNorm(whiten_conv_width),
         nn.GELU(),
         ConvGroup(whiten_conv_width, widths['block1']),
         ConvGroup(widths['block1'],  widths['block2']),
@@ -232,34 +220,12 @@ def make_net():
         nn.Linear(widths['block3'], 10, bias=False),
         Mul(hyp['net']['scaling_factor']),
     )
-    net[0].weight.requires_grad = False
     net = net.half().cuda()
     net = net.to(memory_format=torch.channels_last)
     for mod in net.modules():
         if isinstance(mod, BatchNorm):
             mod.float()
     return net
-
-#############################################
-#       Whitening Conv Initialization       #
-#############################################
-
-def get_patches(x, patch_shape):
-    c, (h, w) = x.shape[1], patch_shape
-    return x.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1,c,h,w).float()
-
-def get_whitening_parameters(patches):
-    n,c,h,w = patches.shape
-    patches_flat = patches.view(n, -1)
-    est_patch_covariance = (patches_flat.T @ patches_flat) / n
-    eigenvalues, eigenvectors = torch.linalg.eigh(est_patch_covariance, UPLO='U')
-    return eigenvalues.flip(0).view(-1, 1, 1, 1), eigenvectors.T.reshape(c*h*w,c,h,w).flip(0)
-
-def init_whitening_conv(layer, train_set, eps=5e-4):
-    patches = get_patches(train_set, patch_shape=layer.weight.data.shape[2:])
-    eigenvalues, eigenvectors = get_whitening_parameters(patches)
-    eigenvectors_scaled = eigenvectors / torch.sqrt(eigenvalues + eps)
-    layer.weight.data[:] = torch.cat((eigenvectors_scaled, -eigenvectors_scaled))
 
 ############################################
 #                 Logging                  #
@@ -276,11 +242,11 @@ def print_columns(columns_list, is_head=False, is_final_entry=False):
     if is_head or is_final_entry:
         print('-'*len(print_string))
 
-logging_columns_list = ['run   ', 'epoch', 'train_loss', 'val_loss', 'train_acc', 'val_acc', 'tta_val_acc', 'total_time_seconds']
+logging_columns_list = ['run', 'epoch', 'train_loss', 'val_loss', 'train_acc', 'val_acc', 'tta_val_acc', 'total_time_seconds']
 def print_training_details(variables, is_final_entry):
     formatted = []
     for col in logging_columns_list:
-        var = variables.get(col.strip(), None)
+        var = variables.get(col, None)
         if type(var) in (int, str):
             res = str(var)
         elif type(var) is float:
@@ -307,7 +273,6 @@ def main(run):
     kilostep_scale = 1024 * (1 + 1 / (1 - momentum))
     lr = hyp['opt']['lr'] / kilostep_scale # un-decoupled learning rate for PyTorch SGD
     wd = hyp['opt']['weight_decay'] * batch_size / kilostep_scale
-    lr_biases = lr * hyp['opt']['bias_scaler']
 
     loss_fn = nn.CrossEntropyLoss(label_smoothing=hyp['opt']['label_smoothing'], reduction='none')
 
@@ -324,32 +289,18 @@ def main(run):
                             [0.2, 1, 0]) # triangular learning rate schedule
 
     model = make_net()
+    lookahead_state = None
     current_steps = 0
 
-    norm_biases = [p for k, p in model.named_parameters() if 'norm' in k and p.requires_grad]
-    other_params = [p for k, p in model.named_parameters() if 'norm' not in k and p.requires_grad]
-    param_configs = [dict(params=norm_biases, lr=lr_biases, weight_decay=wd/lr_biases),
-                     dict(params=other_params, lr=lr, weight_decay=wd/lr)]
-    optimizer = torch.optim.SGD(param_configs, momentum=momentum, nesterov=True)
+    optimizer = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=wd/lr, momentum=momentum, nesterov=True)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda i: lr_schedule[i])
 
     # For accurately timing GPU code
     starter = torch.cuda.Event(enable_timing=True)
     ender = torch.cuda.Event(enable_timing=True)
-
     total_time_seconds = 0.0
 
-    # Initialize the whitening layer using training images
-    starter.record()
-    train_images = train_loader.normalize(train_loader.images[:5000])
-    init_whitening_conv(model[0], train_images)
-    ender.record()
-    torch.cuda.synchronize()
-    total_time_seconds += 1e-3 * starter.elapsed_time(ender)
-
     for epoch in range(math.ceil(epochs)):
-
-        model[0].bias.requires_grad = (epoch < hyp['opt']['whiten_bias_epochs'])
 
         ####################
         #     Training     #
@@ -404,46 +355,11 @@ def main(run):
     starter.record()
 
     with torch.no_grad():
-
-        # Test-time augmentation strategy (for tta_level=2):
-        # 1. Flip/mirror the image left-to-right (50% of the time).
-        # 2. Translate the image by one pixel either up-and-left or down-and-right (50% of the time,
-        #    i.e. both happen 25% of the time).
-        #
-        # This creates 6 views per image (left/right times the two translations and no-translation),
-        # which we evaluate and then weight according to the given probabilities.
-
-        test_images = test_loader.normalize(test_loader.images)
-        test_labels = test_loader.labels
-
-        def infer_basic(inputs, net):
-            return net(inputs).clone() # using .clone() here averts some kind of bug with torch.compile
-
-        def infer_mirror(inputs, net):
-            return 0.5 * net(inputs) + 0.5 * net(inputs.flip(-1))
-
-        def infer_mirror_translate(inputs, net):
-            logits = infer_mirror(inputs, net)
-            pad = 1
-            padded_inputs = F.pad(inputs, (pad,)*4, 'reflect')
-            inputs_translate_list = [
-                padded_inputs[:, :, 0:32, 0:32],
-                padded_inputs[:, :, 2:34, 2:34],
-            ]
-            logits_translate_list = [infer_mirror(inputs_translate, net) for inputs_translate in inputs_translate_list]
-            logits_translate = torch.stack(logits_translate_list).mean(0)
-            return 0.5 * logits + 0.5 * logits_translate
-
-        if hyp['net']['tta_level'] == 0:
-            infer_fn = infer_basic
-        elif hyp['net']['tta_level'] == 1:
-            infer_fn = infer_mirror
-        elif hyp['net']['tta_level'] == 2:
-            infer_fn = infer_mirror_translate
-
-        model.eval()
-        logits_tta = torch.cat([infer_fn(inputs, model) for inputs in test_images.split(2000)])
-        tta_val_acc = (logits_tta.argmax(1) == test_labels).float().mean().item()
+        # Test-time augmentation strategy: Flip/mirror the image left-to-right (50% of the time).
+        test_images = train_loader.normalize(test_loader.images)
+        logits_tta = torch.cat([0.5 * model(inputs) + 0.5 * model(inputs.flip(-1))
+                                for inputs in test_images.split(2000)])
+        tta_val_acc = (logits_tta.argmax(1) == test_loader.labels).float().mean().item()
 
     ender.record()
     torch.cuda.synchronize()
@@ -459,7 +375,6 @@ if __name__ == "__main__":
         code = f.read()
 
     print_columns(logging_columns_list, is_head=True)
-    #main('warmup')
     accs = torch.tensor([main(run) for run in range(25)])
     print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
