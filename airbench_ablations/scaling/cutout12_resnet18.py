@@ -1,5 +1,5 @@
-# ResNet-18 training script optimized for time-to-96%.
-# 13.35 PFLOPs
+# A ResNet-18 training script optimized for time-to-96%.
+# 180s runtime on an A100; 13.35 PFLOPs.
 #
 # Sample output:
 #
