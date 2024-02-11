@@ -29,9 +29,10 @@ Note: lookahead only helps when combined with fast BatchNorm momentum, and vice 
 
 Feature categories:
 * Initialization: `whiten`, `dirac`
-* Optimization: `scalebias`, `freeze`, `lookahead`
+* Optimization: `scalebias`, `lookahead`
 * Evaluation: `tta`
 * Data distribution: `mirror`
+* Epoch speed: `freeze`, `compile`
 
 ### Baselines
 | Script | Feature | Time | PFLOPs | Epochs |
