@@ -1,12 +1,12 @@
 # A variant of airbench optimized for time-to-96%.
 # 75s runtime on an A100; 11.2 PFLOPs.
 #
-# changes relative to airbench:
-# * doubled width and roughly halved learning rate.
-# * added extra layer in each ConvBlock - network now contains 10 conv layers.
-# * added residual connections over the last two conv layers in each ConvBlock.
-# * added 12-pixel cutout data augmentation, increased random-translation strength from 2 to 4 pixels.
-# * increased training epochs to 40.
+# Changes relative to airbench:
+# - Doubled width and roughly halved learning rate.
+# - Added extra layer to each ConvBlock. The network now contains 10 conv layers.
+# - Added residual connections over the last two conv layers in each ConvBlock.
+# - Added 12-pixel cutout data augmentation and increased random-translation strength from 2 to 4 pixels.
+# - Increased training duration to 40 epochs.
 
 #############################################
 #            Setup/Hyperparameters          #
