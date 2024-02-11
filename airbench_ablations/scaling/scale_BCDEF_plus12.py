@@ -1,6 +1,4 @@
-# epochs=11.5 -> 94.08 in n=25
-# epochs=11.2 -> 94.07 in n=25
-# epochs=10.7 -> 94.00 in n=125
+# 94.02 in n=25, 9.3 seconds, 0.78 PFLOPs
 #############################################
 #            Setup/Hyperparameters          #
 #############################################
@@ -32,13 +30,19 @@ torch.backends.cudnn.benchmark = True
 
 hyp = {
     'opt': {
-        'train_epochs': 30,
+        'train_epochs': 42,
         'batch_size': 1024,
-        'lr': 10.0,                 # learning rate per 1024 examples
+        'lr': 11.5,                 # learning rate per 1024 examples
         'momentum': 0.85,           # decay per 1024 examples (e.g. batch_size=512 gives sqrt of this)
         'weight_decay': 0.0153,     # weight decay per 1024 examples (decoupled from learning rate)
         'bias_scaler': 64.0,        # scales up learning rate (but not weight decay) for BatchNorm biases
         'label_smoothing': 0.2,
+        'ema': {
+            'start_epochs': 3,
+            'decay_base': 0.95,
+            'decay_pow': 3.,
+            'every_n_steps': 5,
+        },
         'whiten_bias_epochs': 3,    # how many epochs to train the whitening layer bias before freezing
     },
     'aug': {
@@ -49,7 +53,7 @@ hyp = {
         'whitening': {
             'kernel_size': 2,
         },
-        'batchnorm_momentum': 0.9,
+        'batchnorm_momentum': 0.6,
         'base_width': 128,
         'scaling_factor': 1/9,
         'tta_level': 2,         # the level of test-time augmentation: 0=none, 1=mirror, 2=mirror+translate
@@ -222,7 +226,8 @@ def make_net():
     }
     whiten_conv_width = 2 * 3 * hyp['net']['whitening']['kernel_size']**2
     net = nn.Sequential(
-        Conv(3, whiten_conv_width, kernel_size=hyp['net']['whitening']['kernel_size'], padding=0, bias=True),
+        Conv(3, whiten_conv_width, kernel_size=hyp['net']['whitening']['kernel_size'], padding=0),
+        BatchNorm(whiten_conv_width),
         nn.GELU(),
         ConvGroup(whiten_conv_width, widths['block1']),
         ConvGroup(widths['block1'],  widths['block2']),
@@ -232,7 +237,6 @@ def make_net():
         nn.Linear(widths['block3'], 10, bias=False),
         Mul(hyp['net']['scaling_factor']),
     )
-    net[0].weight.requires_grad = False
     net = net.half().cuda()
     net = net.to(memory_format=torch.channels_last)
     for mod in net.modules():
@@ -240,26 +244,20 @@ def make_net():
             mod.float()
     return net
 
-#############################################
-#       Whitening Conv Initialization       #
-#############################################
+############################################
+#                Lookahead                 #
+############################################
 
-def get_patches(x, patch_shape):
-    c, (h, w) = x.shape[1], patch_shape
-    return x.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1,c,h,w).float()
+class LookaheadState:
+    def __init__(self, net):
+        self.net_ema = {k: v.clone() for k, v in net.state_dict().items()}
 
-def get_whitening_parameters(patches):
-    n,c,h,w = patches.shape
-    patches_flat = patches.view(n, -1)
-    est_patch_covariance = (patches_flat.T @ patches_flat) / n
-    eigenvalues, eigenvectors = torch.linalg.eigh(est_patch_covariance, UPLO='U')
-    return eigenvalues.flip(0).view(-1, 1, 1, 1), eigenvectors.T.reshape(c*h*w,c,h,w).flip(0)
-
-def init_whitening_conv(layer, train_set, eps=5e-4):
-    patches = get_patches(train_set, patch_shape=layer.weight.data.shape[2:])
-    eigenvalues, eigenvectors = get_whitening_parameters(patches)
-    eigenvectors_scaled = eigenvectors / torch.sqrt(eigenvalues + eps)
-    layer.weight.data[:] = torch.cat((eigenvectors_scaled, -eigenvectors_scaled))
+    def update(self, net, decay):
+        for ema_param, net_param in zip(self.net_ema.values(), net.state_dict().values()):
+            if net_param.dtype in (torch.half, torch.float):
+                ema_param.lerp_(net_param, 1-decay)
+                # Copy the ema parameters back to the network, similarly to the Lookahead optimizer
+                net_param.copy_(ema_param)
 
 ############################################
 #                 Logging                  #
@@ -320,10 +318,11 @@ def main(run):
 
     total_train_steps = math.ceil(len(train_loader) * epochs)
     lr_schedule = np.interp(np.arange(1+total_train_steps),
-                            [0, int(0.2 * total_train_steps), total_train_steps],
-                            [0.2, 1, 0]) # triangular learning rate schedule
+                            [0, int(0.23 * total_train_steps), total_train_steps],
+                            [0.2, 1, 0.07]) # triangular learning rate schedule
 
     model = make_net()
+    lookahead_state = None
     current_steps = 0
 
     norm_biases = [p for k, p in model.named_parameters() if 'norm' in k and p.requires_grad]
@@ -339,17 +338,7 @@ def main(run):
 
     total_time_seconds = 0.0
 
-    # Initialize the whitening layer using training images
-    starter.record()
-    train_images = train_loader.normalize(train_loader.images[:5000])
-    init_whitening_conv(model[0], train_images)
-    ender.record()
-    torch.cuda.synchronize()
-    total_time_seconds += 1e-3 * starter.elapsed_time(ender)
-
     for epoch in range(math.ceil(epochs)):
-
-        model[0].bias.requires_grad = (epoch < hyp['opt']['whiten_bias_epochs'])
 
         ####################
         #     Training     #
@@ -368,8 +357,22 @@ def main(run):
             scheduler.step()
 
             current_steps += 1
+
+            if epoch >= hyp['opt']['ema']['start_epochs'] and current_steps % hyp['opt']['ema']['every_n_steps'] == 0:
+                if lookahead_state is None:
+                    lookahead_state = LookaheadState(model)
+                else:
+                    # We warm up our ema's decay/momentum value over training (this lets us move fast, then average strongly at the end).
+                    base_rho = hyp['opt']['ema']['decay_base'] ** hyp['opt']['ema']['every_n_steps']
+                    rho = base_rho * (current_steps / total_train_steps) ** hyp['opt']['ema']['decay_pow']
+                    lookahead_state.update(model, decay=rho)
+
             if current_steps >= total_train_steps:
                 break
+
+        if lookahead_state is not None:
+            # Copy back parameters a final time after each epoch
+            lookahead_state.update(model, decay=1.0)
 
         ender.record()
         torch.cuda.synchronize()
@@ -460,7 +463,7 @@ if __name__ == "__main__":
 
     print_columns(logging_columns_list, is_head=True)
     #main('warmup')
-    accs = torch.tensor([main(run) for run in range(10)])
+    accs = torch.tensor([main(run) for run in range(5)])
     print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
     log = {'code': code, 'accs': accs}
