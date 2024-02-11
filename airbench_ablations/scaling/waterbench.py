@@ -4,8 +4,9 @@
 # changes relative to airbench:
 # * doubled width and roughly halved learning rate.
 # * added extra layer in each ConvBlock - network now contains 10 conv layers.
+# * added residual connections over the last two conv layers in each ConvBlock.
 # * added 12-pixel cutout data augmentation, increased random-translation strength from 2 to 4 pixels.
-# * increased training epochs to 64.
+# * increased training epochs to 40.
 
 #############################################
 #            Setup/Hyperparameters          #
@@ -38,7 +39,7 @@ torch.backends.cudnn.benchmark = True
 
 hyp = {
     'opt': {
-        'train_epochs': 64,
+        'train_epochs': 40,
         'batch_size': 1024,
         'lr': 6.0,                 # learning rate per 1024 examples
         'momentum': 0.85,           # decay per 1024 examples (e.g. batch_size=512 gives sqrt of this)
@@ -245,12 +246,14 @@ class ConvGroup(nn.Module):
         x = self.pool(x)
         x = self.norm1(x)
         x = self.activ(x)
+        x0 = x
         x = self.conv2(x)
         x = self.norm2(x)
         x = self.activ(x)
         x = self.conv3(x)
         x = self.norm3(x)
         x = self.activ(x)
+        x += x0
         return x
 
 #############################################
@@ -533,7 +536,7 @@ if __name__ == "__main__":
 
     print_columns(logging_columns_list, is_head=True)
     #main('warmup')
-    accs = torch.tensor([main(run) for run in range(10)])
+    accs = torch.tensor([main(run) for run in range(25)])
     print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
     log = {'code': code, 'accs': accs}
