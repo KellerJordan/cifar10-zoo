@@ -253,7 +253,7 @@ def train(train_loader, test_loader=None, epochs=hyp['opt']['epochs'], lr=hyp['o
                                 weight_decay=wd*batch_size)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule.__getitem__)
 
-    train_loss, train_acc, test_acc = [], [], []
+    train_loss, train_acc, test_acc = [], [], [torch.nan]
 
     it = tqdm(range(epochs))
     for epoch in it:
@@ -268,6 +268,7 @@ def train(train_loader, test_loader=None, epochs=hyp['opt']['epochs'], lr=hyp['o
             loss.sum().backward()
             optimizer.step()
             scheduler.step()
+            it.set_description('Acc=%.4f(train),%.4f(test)' % (train_acc[-1], test_acc[-1]))
 
         test_acc.append(evaluate(model, test_loader))
         it.set_description('Acc=%.4f(train),%.4f(test)' % (train_acc[-1], test_acc[-1]))
@@ -288,12 +289,11 @@ if __name__ == '__main__':
     else:
         data_path = None
 
-    for _ in range(10):
-        model, log = train(train_loader)
-        log['hyp'] = hyp
-        log['code'] = code
-        log['data'] = data_path
-        print('Final acc: %.4f' % log['test_acc'][-1])
+    model, log = train(train_loader)
+    log['hyp'] = hyp
+    log['code'] = code
+    log['data'] = data_path
+    print('Final acc: %.4f' % log['test_acc'][-1])
 
     log_dir = os.path.join('logs', str(uuid.uuid4()))
     os.makedirs(log_dir, exist_ok=True)
