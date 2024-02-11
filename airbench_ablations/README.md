@@ -49,5 +49,6 @@ Feature categories:
 | `main9_AF.py` | Includes only whitening transform and alternating flip. | 8.2 | 0.72 | 20.0 |
 | `main9_AE.py` | Includes only whitening transform and multi-crop TTA. | 7.5 | 0.66 | 18.1 |
 
-![figure](figure.png)
+![figure1](figure1.png)
+![figure2](figure2.png)
 
