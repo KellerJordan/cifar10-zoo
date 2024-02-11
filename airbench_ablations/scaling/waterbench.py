@@ -1,5 +1,5 @@
 # A variant of airbench optimized for time-to-96%.
-# 75s runtime on an A100; 11.2 PFLOPs.
+# 49s runtime on an A100; 7.46 PFLOPs.
 #
 # Changes relative to airbench:
 # - Doubled width and roughly halved learning rate.
