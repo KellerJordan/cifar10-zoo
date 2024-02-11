@@ -20,7 +20,7 @@ Runtimes are measured in seconds on a single NVIDIA A100. Each script attains sl
 | `main3_scalebias.py` | Scales up the learning rate for BatchNorm biases by 64x. | 5.5 | 0.49 | 13.5 |
 | `main4_freeze.py` | Freezes first conv layer bias after 3 epochs. | 5.2 | 0.47 | 13.5 |
 | `main5_lookahead.py` | Adds lookahead / EMA-based optimization scheme from hlb-cifar10. | 4.6 | 0.42 | 12.0 |
-| `main6_tta.py` | Evaluates with extra multi-crop TTA. | 4.3 | 0.39 | 10.8 |
+| `main6_tta.py` | Evaluates with extra multi-crop test-time augmentation. | 4.3 | 0.39 | 10.8 |
 | `main7_mirror.py` | Replaces the standard random-flip data augmentation with a semi-deterministic alternating flip method. | 3.9 | 0.36 | 9.9 |
 | `main8_compile.py` | Compiles model with `torch.compile`. This is the final version. | 3.5 | 0.36 | 9.9 |
 
@@ -40,15 +40,7 @@ Feature categories:
 | [cifar10-fast](https://github.com/davidcpage/cifar10-fast) | Fast training script as described in [How to Train Your ResNet](https://myrtle.ai/learn/how-to-train-your-resnet/) | 14.9 | 1.14 | 10.0 |
 | `train_resnet18.py` | ResNet-18 training script optimized for time-to-94% | 52.1  | 4.35 | 26.0 |
 
-### Further ablations
-| Script | Feature | Time | PFLOPs | Epochs |
-| - | - | - | - | - |
-| `main9_BCDEF.py` | Includes all features except for the initial whitening layer. | 9.3 | 0.78 | 22.0 |
-| `main9_ACDEF.py` | Includes all features except for identity initialization of conv layers. | 5.0 | 0.46 | 12.7 |
-| `main9_ABDEF.py` | Includes all features except for scaling up of BN bias learning rate. | 5.6 | 0.51 | 14.2 |
-| `main9_AF.py` | Includes only whitening transform and alternating flip. | 8.2 | 0.72 | 20.0 |
-| `main9_AE.py` | Includes only whitening transform and multi-crop TTA. | 7.5 | 0.66 | 18.1 |
-
+### Additivity figures
 ![figure1](figure1.png)
 ![figure2](figure2.png)
 
