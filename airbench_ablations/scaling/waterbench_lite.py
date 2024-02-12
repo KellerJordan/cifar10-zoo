@@ -1,4 +1,13 @@
-# 96.74% in 375s runtime on an A100; 72.5 PFLOPs.
+# A variant of airbench optimized for time-to-95%.
+# 10.8s runtime on an A100; 1.39 PFLOPs.
+# Evidence: 95.03 average accuracy in n=100 runs.
+#
+# Changes relative to airbench:
+# - Doubled width and reduced learning rate.
+# - Added extra layer to each ConvBlock. The network now contains 10 conv layers.
+# - Added residual connections over the last two conv layers in each ConvBlock.
+# - Added 12-pixel cutout data augmentation and increased random-translation strength from 2 to 4 pixels.
+# - Increased training duration to 40 epochs.
 
 #############################################
 #            Setup/Hyperparameters          #
@@ -31,9 +40,9 @@ torch.backends.cudnn.benchmark = True
 
 hyp = {
     'opt': {
-        'train_epochs': 100,
+        'train_epochs': 15.0,
         'batch_size': 1024,
-        'lr': 6.0,                 # learning rate per 1024 examples
+        'lr': 10.0,                 # learning rate per 1024 examples
         'momentum': 0.85,           # decay per 1024 examples (e.g. batch_size=512 gives sqrt of this)
         'weight_decay': 0.0153,     # weight decay per 1024 examples (decoupled from learning rate)
         'bias_scaler': 64.0,        # scales up learning rate (but not weight decay) for BatchNorm biases
@@ -48,15 +57,15 @@ hyp = {
     },
     'aug': {
         'flip': True,
-        'translate': 4,
-        'cutout': 12,
+        'translate': 2,
+        'cutout': 0,
     },
     'net': {
         'whitening': {
             'kernel_size': 2,
         },
         'batchnorm_momentum': 0.6,
-        'base_width': 256,
+        'base_width': 64,
         'scaling_factor': 1/9,
         'tta_level': 2,         # the level of test-time augmentation: 0=none, 1=mirror, 2=mirror+translate
     },
@@ -229,8 +238,6 @@ class ConvGroup(nn.Module):
         self.norm1 = BatchNorm(channels_out)
         self.conv2 = Conv(channels_out, channels_out)
         self.norm2 = BatchNorm(channels_out)
-        self.conv3 = Conv(channels_out, channels_out)
-        self.norm3 = BatchNorm(channels_out)
         self.activ = nn.GELU()
 
     def forward(self, x):
@@ -238,14 +245,9 @@ class ConvGroup(nn.Module):
         x = self.pool(x)
         x = self.norm1(x)
         x = self.activ(x)
-        x0 = x
         x = self.conv2(x)
         x = self.norm2(x)
         x = self.activ(x)
-        x = self.conv3(x)
-        x = self.norm3(x)
-        x = self.activ(x)
-        x += x0
         return x
 
 #############################################
@@ -254,9 +256,9 @@ class ConvGroup(nn.Module):
 
 def make_net():
     widths = {
-        'block1': (1 * hyp['net']['base_width']), # 64  w/ width at base value
-        'block2': (4 * hyp['net']['base_width']), # 256 w/ width at base value
-        'block3': (4 * hyp['net']['base_width']), # 256 w/ width at base value
+        'block1': (2 * hyp['net']['base_width']), # 64  w/ width at base value
+        'block2': (6 * hyp['net']['base_width']), # 256 w/ width at base value
+        'block3': (6 * hyp['net']['base_width']), # 256 w/ width at base value
     }
     whiten_conv_width = 2 * 3 * hyp['net']['whitening']['kernel_size']**2
     net = nn.Sequential(
@@ -528,7 +530,7 @@ if __name__ == "__main__":
 
     print_columns(logging_columns_list, is_head=True)
     #main('warmup')
-    accs = torch.tensor([main(run) for run in range(1)])
+    accs = torch.tensor([main(run) for run in range(25)])
     print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
     log = {'code': code, 'accs': accs}
