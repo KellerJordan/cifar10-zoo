@@ -43,7 +43,7 @@ hyp = {
         'train_epochs': 15.0,
         'batch_size': 1024,
         'lr': 10.0,                 # learning rate per 1024 examples
-        'momentum': 0.85,           # decay per 1024 examples (e.g. batch_size=512 gives sqrt of this)
+        'momentum': 0.85,
         'weight_decay': 0.0153,     # weight decay per 1024 examples (decoupled from learning rate)
         'bias_scaler': 64.0,        # scales up learning rate (but not weight decay) for BatchNorm biases
         'label_smoothing': 0.2,
@@ -58,7 +58,6 @@ hyp = {
     'aug': {
         'flip': True,
         'translate': 2,
-        'cutout': 0,
     },
     'net': {
         'whitening': {
@@ -110,29 +109,6 @@ def batch_crop(images, crop_size):
             images_out[mask] = images_tmp[mask, :, :, r+s:r+s+crop_size]
     return images_out
 
-def make_random_square_masks(inputs, size):
-    is_even = int(size % 2 == 0)
-    n,c,h,w = inputs.shape
-
-    # seed top-left corners of squares to cutout boxes from, in one dimension each
-    corner_y = torch.randint(0, h-size+1, size=(n,), device=inputs.device)
-    corner_x = torch.randint(0, w-size+1, size=(n,), device=inputs.device)
-
-    # measure distance, using the center as a reference point
-    corner_y_dists = torch.arange(h, device=inputs.device).view(1, 1, h, 1) - corner_y.view(-1, 1, 1, 1)
-    corner_x_dists = torch.arange(w, device=inputs.device).view(1, 1, 1, w) - corner_x.view(-1, 1, 1, 1)
-    
-    mask_y = (corner_y_dists >= 0) * (corner_y_dists < size)
-    mask_x = (corner_x_dists >= 0) * (corner_x_dists < size)
-
-    final_mask = mask_y * mask_x
-
-    return final_mask
-
-def batch_cutout(inputs, size):
-    cutout_masks = make_random_square_masks(inputs, size)
-    return inputs.masked_fill(cutout_masks, 0)
-
 class PrepadCifarLoader:
 
     def __init__(self, path, train=True, batch_size=500, aug=None, drop_last=None, shuffle=None, gpu=0):
@@ -154,7 +130,7 @@ class PrepadCifarLoader:
 
         self.aug = aug or {}
         for k in self.aug.keys():
-            assert k in ['flip', 'translate', 'cutout'], 'Unrecognized key: %s' % k
+            assert k in ['flip', 'translate'], 'Unrecognized key: %s' % k
 
         self.batch_size = batch_size
         self.drop_last = train if drop_last is None else drop_last
@@ -185,8 +161,6 @@ class PrepadCifarLoader:
         if self.aug.get('flip', False):
             if self.epoch % 2 == 1:
                 images = images.flip(-1)
-        if self.aug.get('cutout', 0) > 0:
-            images = batch_cutout(images, self.aug['cutout'])
 
         self.epoch += 1
 
@@ -256,9 +230,9 @@ class ConvGroup(nn.Module):
 
 def make_net():
     widths = {
-        'block1': (2 * hyp['net']['base_width']), # 64  w/ width at base value
-        'block2': (6 * hyp['net']['base_width']), # 256 w/ width at base value
-        'block3': (6 * hyp['net']['base_width']), # 256 w/ width at base value
+        'block1': (2 * hyp['net']['base_width']), # 128  w/ width at base value
+        'block2': (6 * hyp['net']['base_width']), # 384 w/ width at base value
+        'block3': (6 * hyp['net']['base_width']), # 384 w/ width at base value
     }
     whiten_conv_width = 2 * 3 * hyp['net']['whitening']['kernel_size']**2
     net = nn.Sequential(
