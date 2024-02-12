@@ -1,12 +1,4 @@
-# A variant of airbench optimized for time-to-96%.
-# 49s runtime on an A100; 7.46 PFLOPs.
-#
-# Changes relative to airbench:
-# - Doubled width and reduced learning rate.
-# - Added extra layer to each ConvBlock. The network now contains 10 conv layers.
-# - Added residual connections over the last two conv layers in each ConvBlock.
-# - Added 12-pixel cutout data augmentation and increased random-translation strength from 2 to 4 pixels.
-# - Increased training duration to 40 epochs.
+# 96.74% in 375s runtime on an A100; 72.5 PFLOPs.
 
 #############################################
 #            Setup/Hyperparameters          #
@@ -39,7 +31,7 @@ torch.backends.cudnn.benchmark = True
 
 hyp = {
     'opt': {
-        'train_epochs': 200,
+        'train_epochs': 100,
         'batch_size': 1024,
         'lr': 6.0,                 # learning rate per 1024 examples
         'momentum': 0.85,           # decay per 1024 examples (e.g. batch_size=512 gives sqrt of this)
