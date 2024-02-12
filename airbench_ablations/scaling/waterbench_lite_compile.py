@@ -46,7 +46,7 @@ hyp = {
     },
     'aug': {
         'flip': True,
-        'translate': 4,
+        'translate': 2,
     },
     'net': {
         'whitening': {

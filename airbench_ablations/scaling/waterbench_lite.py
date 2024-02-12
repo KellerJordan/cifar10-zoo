@@ -1,13 +1,10 @@
 # A variant of airbench optimized for time-to-95%.
 # 10.8s runtime on an A100; 1.39 PFLOPs.
-# Evidence: 95.03 average accuracy in n=100 runs.
+# Evidence: 95.00 average accuracy in n=100 runs.
 #
 # Changes relative to airbench:
-# - Doubled width and reduced learning rate.
-# - Added extra layer to each ConvBlock. The network now contains 10 conv layers.
-# - Added residual connections over the last two conv layers in each ConvBlock.
-# - Added 12-pixel cutout data augmentation and increased random-translation strength from 2 to 4 pixels.
-# - Increased training duration to 40 epochs.
+# - Increased width and reduced learning rate.
+# - Increased training duration to 15 epochs.
 
 #############################################
 #            Setup/Hyperparameters          #
@@ -340,7 +337,7 @@ def main(run):
 
     loss_fn = nn.CrossEntropyLoss(label_smoothing=hyp['opt']['label_smoothing'], reduction='none')
 
-    train_augs = dict(flip=hyp['aug']['flip'], translate=hyp['aug']['translate'], cutout=hyp['aug']['cutout'])
+    train_augs = dict(flip=hyp['aug']['flip'], translate=hyp['aug']['translate'])
     train_loader = PrepadCifarLoader('cifar10', train=True, batch_size=batch_size, aug=train_augs)
     test_loader = PrepadCifarLoader('cifar10', train=False, batch_size=2000)
     if run == 'warmup':
