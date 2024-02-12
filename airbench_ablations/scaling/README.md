@@ -3,6 +3,9 @@
 We develop a variant of airbench which reaches 96% accuracy (>= full ResNet-18 training).
 This is a harder target which ends up requiring 20x more compute.
 
+We use a larger network that contains 10 convolutional layers, residual connections, and a
+total of 12,721,208 parameters.
+
 | Script | Description | Time | PFLOPs | Epochs |
 | - | - | - | - | - | 
 | `resnet18_96p.py` | Baseline ResNet18 training script optimized for time-to-96%. | 186s | 13.4 | 80 |

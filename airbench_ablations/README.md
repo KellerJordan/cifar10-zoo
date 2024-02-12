@@ -9,6 +9,7 @@ Our network architecture is the same as that in [hlb-cifar10](https://github.com
 2. We replace the custom MaxPool at the end with nn.MaxPool2d(3).
 3. We reduce the final block width from 512 to 256.
 4. We add a learnable bias to the first conv layer.
+The network has 1,971,640 parameters.
 
 Runtimes are measured in seconds on a single NVIDIA A100. Each script attains slightly over 94% accuracy.
 
