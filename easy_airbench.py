@@ -30,7 +30,7 @@ torch.backends.cudnn.benchmark = True
 
 hyp = {
     'opt': {
-        'train_epochs': 30,
+        'train_epochs': 9.9,
         'batch_size': 1024,
         'lr': 11.5,                 # learning rate per 1024 examples
         'momentum': 0.85,
@@ -47,14 +47,14 @@ hyp = {
     },
     'aug': {
         'flip': True,
-        'translate': 4,
+        'translate': 2,
     },
     'net': {
         'whitening': {
             'kernel_size': 2,
         },
         'batchnorm_momentum': 0.6,
-        'base_width': 128,
+        'base_width': 64,
         'scaling_factor': 1/9,
         'tta_level': 2,         # the level of test-time augmentation: 0=none, 1=mirror, 2=mirror+translate
     },
