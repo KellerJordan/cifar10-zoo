@@ -1,5 +1,6 @@
 # A variant of airbench optimized for time-to-96%.
 # 49s runtime on an A100; 7.46 PFLOPs.
+# Evidence: 96.05 average accuracy in n=100 runs.
 #
 # Changes relative to airbench:
 # - Doubled width and reduced learning rate.
