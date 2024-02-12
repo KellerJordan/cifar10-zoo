@@ -1,6 +1,6 @@
 # Scaling
 
-We develop a variant of airbench optimized for time-to-96% accuracy.
+We develop a variant of airbench optimized for time-to-96%.
 This is a much harder target which ends up requiring 20x more compute.
 
 | Script | Description | Time | PFLOPs | Epochs |
