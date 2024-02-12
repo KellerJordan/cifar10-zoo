@@ -1,6 +1,11 @@
+# eaiser_airbench.py
+# Simplified variant of airbench which removes compilation and lookahead optimization, at the
+# cost of +0.5 seconds to 94%.
+#
 # epochs=11.5 -> 94.08 in n=25
 # epochs=11.2 -> 94.07 in n=25
 # epochs=10.7 -> 94.00 in n=125
+#
 #############################################
 #            Setup/Hyperparameters          #
 #############################################
