@@ -1,4 +1,4 @@
-# 94.02 in n=200
+# 94.02 in n=700
 #############################################
 #            Setup/Hyperparameters          #
 #############################################
@@ -30,10 +30,10 @@ torch.backends.cudnn.benchmark = True
 
 hyp = {
     'opt': {
-        'train_epochs': 10.8,
+        'train_epochs': 80,
         'batch_size': 1024,
         'lr': 11.5,                 # learning rate per 1024 examples
-        'momentum': 0.85,
+        'momentum': 0.85,           # decay per 1024 examples (e.g. batch_size=512 gives sqrt of this)
         'weight_decay': 0.0153,     # weight decay per 1024 examples (decoupled from learning rate)
         'bias_scaler': 64.0,        # scales up learning rate (but not weight decay) for BatchNorm biases
         'label_smoothing': 0.2,
@@ -99,7 +99,7 @@ def batch_crop(images, crop_size):
             images_out[mask] = images_tmp[mask, :, :, r+s:r+s+crop_size]
     return images_out
 
-class PrepadCifarLoader:
+class CifarLoader:
 
     def __init__(self, path, train=True, batch_size=500, aug=None, drop_last=None, shuffle=None, gpu=0):
         data_path = os.path.join(path, 'train.pt' if train else 'test.pt')
@@ -113,6 +113,10 @@ class PrepadCifarLoader:
         self.images, self.labels, self.classes = data['images'], data['labels'], data['classes']
         # It's faster to load+process uint8 data than to load preprocessed fp16 data
         self.images = (self.images.half() / 255).permute(0, 3, 1, 2).to(memory_format=torch.channels_last)
+
+        if train:
+            self.images = self.images[:10000]
+            self.labels = self.labels[:10000]
 
         self.normalize = T.Normalize(CIFAR_MEAN, CIFAR_STD)
         self.proc_images = {} # Saved results of image processing to be done on the first epoch
@@ -133,18 +137,26 @@ class PrepadCifarLoader:
 
         if self.epoch == 0:
             images = self.proc_images['norm'] = self.normalize(self.images)
+            # Pre-flip images in order to do every-other epoch flipping scheme
+            if self.aug.get('flip', False):
+                images = self.proc_images['flip'] = batch_flip_lr(images)
             # Pre-pad images to save time when doing random translation
             pad = self.aug.get('translate', 0)
             if pad > 0:
                 self.proc_images['pad'] = F.pad(images, (pad,)*4, 'reflect')
-        self.epoch += 1
 
         if self.aug.get('translate', 0) > 0:
             images = batch_crop(self.proc_images['pad'], self.images.shape[-2])
+        elif self.aug.get('flip', False):
+            images = self.proc_images['flip']
         else:
             images = self.proc_images['norm']
+        # Flip all images together every other epoch. This increases diversity relative to random flipping
         if self.aug.get('flip', False):
-            images = batch_flip_lr(images)
+            if self.epoch % 2 == 1:
+                images = images.flip(-1)
+
+        self.epoch += 1
 
         indices = (torch.randperm if self.shuffle else torch.arange)(len(images), device=images.device)
         for i in range(len(self)):
@@ -323,8 +335,8 @@ def main(run):
     loss_fn = nn.CrossEntropyLoss(label_smoothing=hyp['opt']['label_smoothing'], reduction='none')
 
     train_augs = dict(flip=hyp['aug']['flip'], translate=hyp['aug']['translate'])
-    train_loader = PrepadCifarLoader('cifar10', train=True, batch_size=batch_size, aug=train_augs)
-    test_loader = PrepadCifarLoader('cifar10', train=False, batch_size=2000)
+    train_loader = CifarLoader('cifar10', train=True, batch_size=batch_size, aug=train_augs)
+    test_loader = CifarLoader('cifar10', train=False, batch_size=2000)
     if run == 'warmup':
         # The only purpose of the first run is to warmup, so we can use dummy data
         train_loader.labels = torch.randint(0, 10, size=(len(train_loader.labels),), device=train_loader.labels.device)
@@ -486,7 +498,7 @@ if __name__ == "__main__":
 
     print_columns(logging_columns_list, is_head=True)
     #main('warmup')
-    accs = torch.tensor([main(run) for run in range(25)])
+    accs = torch.tensor([main(run) for run in range(5)])
     print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
     log = {'code': code, 'accs': accs}
