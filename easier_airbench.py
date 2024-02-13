@@ -1,7 +1,7 @@
 # eaiser_airbench.py
 #
 # Simplified variant of airbench without compilation or lookahead optimization.
-#
+
 #############################################
 #            Setup/Hyperparameters          #
 #############################################
