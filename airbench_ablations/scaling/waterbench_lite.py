@@ -1,6 +1,6 @@
 # A variant of airbench optimized for time-to-95%.
 # 10.8s runtime on an A100; 1.39 PFLOPs.
-# Evidence: 95.00 average accuracy in n=100 runs.
+# Evidence: 95.01 average accuracy in n=200 runs.
 # If random flip is used instead of alternating, then decays to 94.95 average accuracy in n=100 runs.
 # With random flip and 16 epochs instead of 15, we get 94.97 in n=100 runs.
 # With random flip and 17, we get 95.01 in n=100 runs.
