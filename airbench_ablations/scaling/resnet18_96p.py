@@ -286,27 +286,9 @@ def train(train_loader, test_loader=None, epochs=hyp['opt']['epochs'], lr=hyp['o
 
 if __name__ == '__main__':
 
-    with open(sys.argv[0]) as f:
-        code = f.read()
-
     train_augs = dict(flip=hyp['aug']['flip'], translate=hyp['aug']['translate'], cutout=hyp['aug']['cutout'])
     train_loader = CifarLoader('cifar10', train=True, batch_size=hyp['opt']['batch_size'], aug=train_augs)
-    if len(sys.argv) >= 2:
-        data_path = sys.argv[1]
-        train_loader.load(data_path)
-    else:
-        data_path = None
 
     model, log = train(train_loader)
-    log['hyp'] = hyp
-    log['code'] = code
-    log['data'] = data_path
     print('Final acc: %.4f' % log['test_acc'][-1])
-
-    log_dir = os.path.join('logs', str(uuid.uuid4()))
-    os.makedirs(log_dir, exist_ok=True)
-    log_path = os.path.join(log_dir, 'log.pt')
-    print(os.path.abspath(log_path))
-    torch.save(log, os.path.join(log_dir, 'log.pt'))
-    torch.save(model.state_dict(), os.path.join(log_dir, 'model.pt'))
 
