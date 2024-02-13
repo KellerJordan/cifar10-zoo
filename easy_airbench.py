@@ -1,4 +1,7 @@
-# 94.02 in n=700
+# easy_airbench.py
+#
+# Uncompiled variant of airbench.py.
+
 #############################################
 #            Setup/Hyperparameters          #
 #############################################
