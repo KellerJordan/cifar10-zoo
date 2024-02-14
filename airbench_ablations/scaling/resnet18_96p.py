@@ -1,5 +1,10 @@
 # A ResNet-18 training script optimized for time-to-96%.
 # 180s runtime on an A100; 13.35 PFLOPs.
+# Doesn't quite reach 96%.
+#
+# 95.875% in n=100
+# with alternating flip instead of random, 95.885% in n=100
+# both have stddev of 0.12%.
 #
 # Sample output:
 #
