@@ -1,4 +1,5 @@
 # 96.74% in 375s runtime on an A100; 72.5 PFLOPs.
+# same arch as airbench_heavy. width increased to 256 and epochs to 100
 
 #############################################
 #            Setup/Hyperparameters          #
