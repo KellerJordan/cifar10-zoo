@@ -96,7 +96,7 @@ print()
 # simple k-NN
 k_range = [1, 3, 5, 7, 9, 11, 15, 25, 51, 101]
 knn_preds = predict_knn(kernel, train_labels, k_range)
-knn_accs = [(pred == test_labels).sum().item() / 100 for pred in knn_preds]
+knn_accs = [100 * (pred == test_labels).float().mean().item() for pred in knn_preds]
 print('k-NN accuracy (by choice of k):')
 print(''.join(['%d\t' % k for k in k_range]))
 print(''.join(['%.2f\t' % k for k in knn_accs]))
@@ -107,7 +107,7 @@ nbr_labels = train_labels[nbrs.indices.cpu()]
 nbr_weights = nbrs.values.cpu()**4
 labels_scores = (F.one_hot(nbr_labels) * nbr_weights[..., None]).mean(1)
 pred = labels_scores.argmax(1)
-acc_weighted = (pred == test_labels).sum().item() / 100
+acc_weighted = 100 * (pred == test_labels).float().mean().item()
 print()
 print('weighted k-NN accuracy (k=20, weighted by kernel value **4): %.2f' % acc_weighted)
 print()
