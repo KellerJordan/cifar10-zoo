@@ -2,6 +2,7 @@
 # 180s runtime on an A100; 13.35 PFLOPs.
 # Doesn't quite reach 96%.
 #
+# tta_level=0 :
 # 95.875% in n=100
 # with alternating flip instead of random, 95.885% in n=100
 # both have stddev of 0.12%.
@@ -9,7 +10,6 @@
 # Sample output:
 #
 #Acc=0.9940(train),0.9604(test): 100%|█████████████████████| 80/80 [03:06<00:00,  2.33s/it]
-#Final acc: 0.9604
 
 #############################################
 #            Setup/Hyperparameters          #
@@ -320,9 +320,22 @@ def train(train_loader, test_loader=None, epochs=hyp['opt']['epochs'], lr=hyp['o
 
 if __name__ == '__main__':
 
+    with open(sys.argv[0]) as f:
+        code = f.read()
+
     train_augs = dict(flip=hyp['aug']['flip'], translate=hyp['aug']['translate'], cutout=hyp['aug']['cutout'])
     train_loader = CifarLoader('cifar10', train=True, batch_size=hyp['opt']['batch_size'], aug=train_augs)
 
-    model, log = train(train_loader)
-    print('Final acc: %.4f' % log['test_acc'][-1])
+    accs = []
+    for _ in range(100):
+        model, log = train(train_loader)
+        acc = log['test_acc'][-1]
+        accs.append(acc)
+    log = dict(hyp=hyp, code=code, accs=accs)
+
+    log_dir = os.path.join('logs', str(uuid.uuid4()))
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, 'log.pt')
+    print(os.path.abspath(log_path))
+    torch.save(log, os.path.join(log_dir, 'log.pt'))
 
