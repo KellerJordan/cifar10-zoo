@@ -39,6 +39,9 @@ hyp = {
         'translate': 4,
         'cutout': 12,
     },
+    'net': {
+        'tta_level': 2,
+    }
 }
 
 #############################################
@@ -241,11 +244,37 @@ def make_rn18():
 #           Train and Eval             #
 ########################################
 
-def evaluate(model, loader):
+@torch.no_grad
+def evaluate(model, loader, tta_level=hyp['net']['tta_level']):
+
+    test_images = loader.normalize(loader.images)
+    test_labels = loader.labels
+
     model.eval()
-    with torch.no_grad():
-        outs = torch.cat([model(inputs) + model(inputs.flip(-1)) for inputs, _ in loader])
-    return (outs.argmax(1) == loader.labels).float().mean().item()
+
+    def infer_basic(inputs, net):
+        return net(inputs).clone() # using .clone() here averts some kind of bug with torch.compile
+
+    def infer_mirror(inputs, net):
+        return 0.5 * net(inputs) + 0.5 * net(inputs.flip(-1))
+
+    def infer_mirror_translate(inputs, net):
+        logits = infer_mirror(inputs, net)
+        pad = 1
+        padded_inputs = F.pad(inputs, (pad,)*4, 'reflect')
+        inputs_translate_list = [
+            padded_inputs[:, :, 0:32, 0:32],
+            padded_inputs[:, :, 2:34, 2:34],
+        ]
+        logits_translate_list = [infer_mirror(inputs_translate, net)
+                                 for inputs_translate in inputs_translate_list]
+        logits_translate = torch.stack(logits_translate_list).mean(0)
+        return 0.5 * logits + 0.5 * logits_translate
+
+    infer_fn = [infer_basic, infer_mirror, infer_mirror_translate][tta_level]
+    logits_tta = torch.cat([infer_fn(inputs, model) for inputs in test_images.split(2000)])
+
+    return (logits_tta.argmax(1) == test_labels).float().mean().item()
 
 def train(train_loader, test_loader=None, epochs=hyp['opt']['epochs'], lr=hyp['opt']['lr']):
 
