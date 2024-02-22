@@ -312,7 +312,8 @@ def train(train_loader, test_loader=None, epochs=hyp['opt']['epochs'], lr=hyp['o
             scheduler.step()
             it.set_description('Acc=%.4f(train),%.4f(test)' % (train_acc[-1], test_acc[-1]))
 
-        test_acc.append(evaluate(model, test_loader))
+        # only do full tta for final eval
+        test_acc.append(evaluate(model, test_loader, tta_level=(2 if epoch == epochs-1 else 0))
         it.set_description('Acc=%.4f(train),%.4f(test)' % (train_acc[-1], test_acc[-1]))
 
     log = dict(train_loss=train_loss, train_acc=train_acc, test_acc=test_acc)
