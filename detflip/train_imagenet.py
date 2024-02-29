@@ -1,12 +1,13 @@
+import torch
 import torch as ch
 from torch.cuda.amp import GradScaler
 from torch.cuda.amp import autocast
 import torch.nn.functional as F
-import torch.distributed as dist
 ch.backends.cudnn.benchmark = True
 ch.autograd.profiler.emit_nvtx(False)
 ch.autograd.profiler.profile(False)
 
+import torchvision
 from torchvision import models
 import torchmetrics
 import numpy as np
@@ -27,15 +28,14 @@ from fastargs.validation import And, OneOf
 
 from ffcv.pipeline.operation import Operation
 from ffcv.loader import Loader, OrderOption
-from ffcv.transforms import ToTensor, ToDevice, Squeeze, NormalizeImage, \
-    RandomHorizontalFlip, ToTorchImage
+from ffcv.transforms import ToTensor, ToDevice, Squeeze, \
+    RandomHorizontalFlip, ToTorchImage, Convert
 from ffcv.fields.rgb_image import CenterCropRGBImageDecoder, \
     RandomResizedCropRGBImageDecoder
 from ffcv.fields.basics import IntDecoder
 
 Section('model', 'model details').params(
     arch=Param(And(str, OneOf(models.__dir__())), default='resnet18'),
-    pretrained=Param(int, 'is pretrained? (1/0)', default=0)
 )
 
 Section('resolution', 'resolution scheduling').params(
@@ -72,21 +72,12 @@ Section('validation', 'Validation parameters stuff').params(
 )
 
 Section('training', 'training hyper param stuff').params(
-    eval_only=Param(int, 'eval only?', default=0),
     batch_size=Param(int, 'The batch size', default=512),
-    optimizer=Param(And(str, OneOf(['sgd'])), 'The optimizer', default='sgd'),
     momentum=Param(float, 'SGD momentum', default=0.9),
     weight_decay=Param(float, 'weight decay', default=4e-5),
     epochs=Param(int, 'number of epochs', default=30),
     label_smoothing=Param(float, 'label smoothing parameter', default=0.1),
-    distributed=Param(int, 'is distributed?', default=0),
     use_blurpool=Param(int, 'use blurpool?', default=0)
-)
-
-Section('dist', 'distributed training options').params(
-    world_size=Param(int, 'number gpus', default=1),
-    address=Param(str, 'address', default='localhost'),
-    port=Param(str, 'port', default='12355')
 )
 
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406]) * 255
@@ -137,15 +128,10 @@ def batch_detflip_lr(inputs, indices, epoch):
     return torch.where(flip_mask, inputs.flip(-1), inputs)
 
 class ImageNetTrainer:
-    @param('training.distributed')
-    def __init__(self, gpu, distributed):
+    def __init__(self):
         self.all_params = get_current_config()
-        self.gpu = gpu
 
         self.uid = str(uuid4())
-
-        if distributed:
-            self.setup_distributed()
 
         self.train_loader = self.create_train_loader()
         self.val_loader = self.create_val_loader()
@@ -153,20 +139,6 @@ class ImageNetTrainer:
         self.create_optimizer()
         self.initialize_logger()
         
-
-    @param('dist.address')
-    @param('dist.port')
-    @param('dist.world_size')
-    def setup_distributed(self, address, port, world_size):
-        os.environ['MASTER_ADDR'] = address
-        os.environ['MASTER_PORT'] = port
-
-        dist.init_process_group("nccl", rank=self.gpu, world_size=world_size)
-        ch.cuda.set_device(self.gpu)
-
-    def cleanup_distributed(self):
-        dist.destroy_process_group()
-
     @param('lr.lr_schedule_type')
     def get_lr(self, epoch, lr_schedule_type):
         lr_schedules = {
@@ -196,12 +168,10 @@ class ImageNetTrainer:
         return final_res
 
     @param('training.momentum')
-    @param('training.optimizer')
     @param('training.weight_decay')
     @param('training.label_smoothing')
-    def create_optimizer(self, momentum, optimizer, weight_decay,
+    def create_optimizer(self, momentum, weight_decay,
                          label_smoothing):
-        assert optimizer == 'sgd'
 
         # Only do weight decay on non-batchnorm parameters
         all_params = list(self.model.named_parameters())
@@ -221,11 +191,9 @@ class ImageNetTrainer:
     @param('data.train_dataset')
     @param('data.num_workers')
     @param('training.batch_size')
-    @param('training.distributed')
     @param('data.in_memory')
     def create_train_loader(self, train_dataset, num_workers, batch_size,
-                            distributed, in_memory):
-        this_device = f'cuda:{self.gpu}'
+                            in_memory):
         train_path = Path(train_dataset)
         assert train_path.is_file()
 
@@ -235,19 +203,20 @@ class ImageNetTrainer:
             self.decoder,
             #RandomHorizontalFlip(),
             ToTensor(),
-            ToDevice(ch.device(this_device), non_blocking=True),
+            ToDevice(ch.device(0), non_blocking=True),
             ToTorchImage(),
-            NormalizeImage(IMAGENET_MEAN, IMAGENET_STD, np.float16)
+            Convert(ch.float16),
+            torchvision.transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
         ]
 
         label_pipeline: List[Operation] = [
             IntDecoder(),
             ToTensor(),
+            ToDevice(ch.device(0)),
             Squeeze(),
-            ToDevice(ch.device(this_device), non_blocking=True)
         ]
 
-        order = OrderOption.RANDOM if distributed else OrderOption.QUASI_RANDOM
+        order = OrderOption.QUASI_RANDOM
         loader = Loader(train_dataset,
                         batch_size=batch_size,
                         num_workers=num_workers,
@@ -257,8 +226,7 @@ class ImageNetTrainer:
                         pipelines={
                             'image': image_pipeline,
                             'label': label_pipeline,
-                        },
-                        distributed=distributed)
+                        })
 
         return loader
 
@@ -266,10 +234,8 @@ class ImageNetTrainer:
     @param('data.num_workers')
     @param('validation.batch_size')
     @param('validation.resolution')
-    @param('training.distributed')
     def create_val_loader(self, val_dataset, num_workers, batch_size,
-                          resolution, distributed):
-        this_device = f'cuda:{self.gpu}'
+                          resolution):
         val_path = Path(val_dataset)
         assert val_path.is_file()
         res_tuple = (resolution, resolution)
@@ -277,17 +243,17 @@ class ImageNetTrainer:
         image_pipeline = [
             cropper,
             ToTensor(),
-            ToDevice(ch.device(this_device), non_blocking=True),
+            ToDevice(ch.device(0), non_blocking=True),
             ToTorchImage(),
-            NormalizeImage(IMAGENET_MEAN, IMAGENET_STD, np.float16)
+            Convert(ch.float16),
+            torchvision.transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
         ]
 
         label_pipeline = [
             IntDecoder(),
             ToTensor(),
+            ToDevice(ch.device(0)),
             Squeeze(),
-            ToDevice(ch.device(this_device),
-            non_blocking=True)
         ]
 
         loader = Loader(val_dataset,
@@ -298,8 +264,7 @@ class ImageNetTrainer:
                         pipelines={
                             'image': image_pipeline,
                             'label': label_pipeline
-                        },
-                        distributed=distributed)
+                        })
         return loader
 
     @param('training.epochs')
@@ -319,30 +284,26 @@ class ImageNetTrainer:
                 self.eval_and_log(extra_dict)
 
         self.eval_and_log({'epoch':epoch})
-        if self.gpu == 0:
-            ch.save(self.model.state_dict(), self.log_folder / 'final_weights.pt')
+        ch.save(self.model.state_dict(), self.log_folder / 'final_weights.pt')
 
     def eval_and_log(self, extra_dict={}):
         start_val = time.time()
         stats = self.val_loop()
         val_time = time.time() - start_val
-        if self.gpu == 0:
-            self.log(dict({
-                'current_lr': self.optimizer.param_groups[0]['lr'],
-                'top_1': stats['top_1'],
-                'top_5': stats['top_5'],
-                'val_time': val_time
-            }, **extra_dict))
+        self.log(dict({
+            'current_lr': self.optimizer.param_groups[0]['lr'],
+            'top_1': stats['top_1'],
+            'top_5': stats['top_5'],
+            'val_time': val_time
+        }, **extra_dict))
 
         return stats
 
     @param('model.arch')
-    @param('model.pretrained')
-    @param('training.distributed')
     @param('training.use_blurpool')
-    def create_model_and_scaler(self, arch, pretrained, distributed, use_blurpool):
+    def create_model_and_scaler(self, arch, use_blurpool):
         scaler = GradScaler()
-        model = getattr(models, arch)(pretrained=pretrained)
+        model = getattr(models, arch)()
         def apply_blurpool(mod: ch.nn.Module):
             for (name, child) in mod.named_children():
                 if isinstance(child, ch.nn.Conv2d) and (np.max(child.stride) > 1 and child.in_channels >= 16): 
@@ -351,10 +312,7 @@ class ImageNetTrainer:
         if use_blurpool: apply_blurpool(model)
 
         model = model.to(memory_format=ch.channels_last)
-        model = model.to(self.gpu)
-
-        if distributed:
-            model = ch.nn.parallel.DistributedDataParallel(model, device_ids=[self.gpu])
+        model = model.cuda()
 
         return model, scaler
 
@@ -431,29 +389,27 @@ class ImageNetTrainer:
     @param('logging.folder')
     def initialize_logger(self, folder):
         self.val_meters = {
-            'top_1': torchmetrics.Accuracy(task='multiclass', num_classes=1000, compute_on_step=False).to(self.gpu),
-            'top_5': torchmetrics.Accuracy(task='multiclass', num_classes=1000, compute_on_step=False, top_k=5).to(self.gpu),
-            'loss': MeanScalarMetric(compute_on_step=False).to(self.gpu)
+            'top_1': torchmetrics.Accuracy(task='multiclass', num_classes=1000).cuda(),
+            'top_5': torchmetrics.Accuracy(task='multiclass', num_classes=1000, top_k=5).cuda(),
+            'loss': MeanScalarMetric().cuda(),
         }
 
-        if self.gpu == 0:
-            folder = (Path(folder) / str(self.uid)).absolute()
-            folder.mkdir(parents=True)
+        folder = (Path(folder) / str(self.uid)).absolute()
+        folder.mkdir(parents=True)
 
-            self.log_folder = folder
-            self.start_time = time.time()
+        self.log_folder = folder
+        self.start_time = time.time()
 
-            print(f'=> Logging in {self.log_folder}')
-            params = {
-                '.'.join(k): self.all_params[k] for k in self.all_params.entries.keys()
-            }
+        print(f'=> Logging in {self.log_folder}')
+        params = {
+            '.'.join(k): self.all_params[k] for k in self.all_params.entries.keys()
+        }
 
-            with open(folder / 'params.json', 'w+') as handle:
-                json.dump(params, handle)
+        with open(folder / 'params.json', 'w+') as handle:
+            json.dump(params, handle)
 
     def log(self, content):
         print(f'=> Log: {content}')
-        if self.gpu != 0: return
         cur_time = time.time()
         with open(self.log_folder / 'log', 'a+') as fd:
             fd.write(json.dumps({
@@ -462,33 +418,6 @@ class ImageNetTrainer:
                 **content
             }) + '\n')
             fd.flush()
-
-    @classmethod
-    @param('training.distributed')
-    @param('dist.world_size')
-    def launch_from_args(cls, distributed, world_size):
-        if distributed:
-            ch.multiprocessing.spawn(cls._exec_wrapper, nprocs=world_size, join=True)
-        else:
-            cls.exec(0)
-
-    @classmethod
-    def _exec_wrapper(cls, *args, **kwargs):
-        make_config(quiet=True)
-        cls.exec(*args, **kwargs)
-
-    @classmethod
-    @param('training.distributed')
-    @param('training.eval_only')
-    def exec(cls, gpu, distributed, eval_only):
-        trainer = cls(gpu=gpu)
-        if eval_only:
-            trainer.eval_and_log()
-        else:
-            trainer.train()
-
-        if distributed:
-            trainer.cleanup_distributed()
 
 # Utils
 class MeanScalarMetric(torchmetrics.Metric):
@@ -517,4 +446,5 @@ def make_config(quiet=False):
 
 if __name__ == "__main__":
     make_config()
-    ImageNetTrainer.launch_from_args()
+    ImageNetTrainer().train()
+
