@@ -1,18 +1,20 @@
 # A ResNet-18 training script optimized for time-to-96%.
-# 180s runtime on an A100; 13.35 PFLOPs.
+# 167s runtime on an A100; 13.35 PFLOPs.
 #
 # Sample output:
-#Acc=0.9760(train),0.9573(test): 100%|█████████████████████| 80/80 [02:59<00:00,  2.24s/it]
-#tta_level=0 acc: 0.9573
-#tta_level=1 acc: 0.9599
-#tta_level=2 acc: 0.9609
-#Acc=0.9880(train),0.9539(test): 100%|█████████████████████| 80/80 [02:55<00:00,  2.20s/it]
-#tta_level=0 acc: 0.9539
-#tta_level=1 acc: 0.9580
-#tta_level=2 acc: 0.9590
-# ..........
+'''
+Training loss=0.0699 acc=0.9780: 100%|████████████████████| 80/80 [02:49<00:00,  2.11s/it]
+tta_level=0 acc: 0.9555
+tta_level=1 acc: 0.9590
+tta_level=2 acc: 0.9603
+Training loss=0.0509 acc=0.9820: 100%|████████████████████| 80/80 [02:47<00:00,  2.09s/it]
+tta_level=0 acc: 0.9532
+tta_level=1 acc: 0.9580
+tta_level=2 acc: 0.9592
+...
+'''
 #
-# At tta_level=0:
+# At tta_level=1:
 # Random flip (default) -> 95.875% in n=100
 # Alterating flip -> 95.885% in n=100
 # Both have stddev of 0.12%.
@@ -316,12 +318,9 @@ def train(train_loader, test_loader=None, epochs=hyp['opt']['epochs'], lr=hyp['o
             loss.sum().backward()
             optimizer.step()
             scheduler.step()
-            it.set_description('Acc=%.4f(train),%.4f(test)' % (train_acc[-1], test_acc[-1]))
+            it.set_description('Training loss=%.4f acc=%.4f' % (train_loss[-1], train_acc[-1]))
 
-        # only do full tta for final eval
-        test_acc.append(evaluate(model, test_loader, tta_level=0))
-        it.set_description('Acc=%.4f(train),%.4f(test)' % (train_acc[-1], test_acc[-1]))
-
+    test_acc.append(evaluate(model, test_loader, tta_level=0))
     print('tta_level=0 acc: %.4f' % test_acc[-1])
     test_acc.append(evaluate(model, test_loader, tta_level=1))
     print('tta_level=1 acc: %.4f' % test_acc[-1])

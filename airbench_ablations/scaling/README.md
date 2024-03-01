@@ -8,7 +8,7 @@ total of 12.7M parameters (a ResNet-18 has 11.2M).
 
 | Script | Description | Time | PFLOPs | Epochs |
 | - | - | - | - | - | 
-| `resnet18_96p.py` | Baseline ResNet18 training script optimized for time-to-96%. | 186s | 13.4 | 80 |
+| `train_resnet18_96.py` | Baseline ResNet18 training script optimized for time-to-96%. | 167s | 13.4 | 80 |
 | `long_dawnbench.py` | Long ResNet-9 training described in [How to Train Your ResNet](https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/) | 104s | 8.3 | 70 |
 | `airbench96.py` | Scaled-up variant of airbench optimized for time-to-96%. | 49s | 7.5 | 40 |
 
