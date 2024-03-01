@@ -2,7 +2,7 @@ import glob
 import torch
 from tqdm import tqdm
 
-pp = glob.glob('/home/ubuntu/cifar10-zoo/logs/*/*.pt')
+pp = glob.glob('./logs/*/*.pt')
 counts = []
 for p in tqdm(pp):
     obj = torch.load(p)
