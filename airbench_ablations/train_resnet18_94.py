@@ -1,5 +1,23 @@
-# random flip => 94.004 in n=200
-# alternating flip => 94.039 in n=200
+# ResNet-18 training script optimized for time-to-94%.
+# Sample output:
+'''
+Training loss=0.1252 acc=0.9580: 100%|████████████████████| 26/26 [00:54<00:00,  2.10s/it]
+tta_level=0 acc: 0.9343
+tta_level=1 acc: 0.9384
+tta_level=2 acc: 0.9406
+Training loss=0.1494 acc=0.9460: 100%|████████████████████| 26/26 [00:54<00:00,  2.10s/it]
+tta_level=0 acc: 0.9336
+tta_level=1 acc: 0.9385
+tta_level=2 acc: 0.9395
+Training loss=0.1669 acc=0.9360: 100%|████████████████████| 26/26 [00:54<00:00,  2.10s/it]
+tta_level=0 acc: 0.9353
+tta_level=1 acc: 0.9393
+tta_level=2 acc: 0.9405
+...
+'''
+# At tta_level=1:
+# Random flip => 94.004 in n=200
+# Alternating flip => 94.039 in n=200
 
 #############################################
 #            Setup/Hyperparameters          #
@@ -29,6 +47,9 @@ hyp = {
         'translate': 4,
         'cutout': 12,
     },
+    'net': {
+        'tta_level': 2,
+    }
 }
 
 #############################################
@@ -231,11 +252,37 @@ def make_rn18():
 #           Train and Eval             #
 ########################################
 
-def evaluate(model, loader):
+@torch.no_grad
+def evaluate(model, loader, tta_level=0):
+
+    test_images = loader.normalize(loader.images)
+    test_labels = loader.labels
+
     model.eval()
-    with torch.no_grad():
-        outs = torch.cat([model(inputs) + model(inputs.flip(-1)) for inputs, _ in loader])
-    return (outs.argmax(1) == loader.labels).float().mean().item()
+
+    def infer_basic(inputs, net):
+        return net(inputs).clone()
+
+    def infer_mirror(inputs, net):
+        return 0.5 * net(inputs) + 0.5 * net(inputs.flip(-1))
+
+    def infer_mirror_translate(inputs, net):
+        logits = infer_mirror(inputs, net)
+        pad = 1
+        padded_inputs = F.pad(inputs, (pad,)*4, 'reflect')
+        inputs_translate_list = [
+            padded_inputs[:, :, 0:32, 0:32],
+            padded_inputs[:, :, 2:34, 2:34],
+        ]
+        logits_translate_list = [infer_mirror(inputs_translate, net)
+                                 for inputs_translate in inputs_translate_list]
+        logits_translate = torch.stack(logits_translate_list).mean(0)
+        return 0.5 * logits + 0.5 * logits_translate
+
+    infer_fn = [infer_basic, infer_mirror, infer_mirror_translate][tta_level]
+    logits_tta = torch.cat([infer_fn(inputs, model) for inputs in test_images.split(2000)])
+
+    return (logits_tta.argmax(1) == test_labels).float().mean().item()
 
 def train(train_loader, test_loader=None, epochs=hyp['opt']['epochs'], lr=hyp['opt']['lr']):
 
@@ -271,19 +318,36 @@ def train(train_loader, test_loader=None, epochs=hyp['opt']['epochs'], lr=hyp['o
             loss.sum().backward()
             optimizer.step()
             scheduler.step()
-            it.set_description('Acc=%.4f(train),%.4f(test)' % (train_acc[-1], test_acc[-1]))
+            it.set_description('Training loss=%.4f acc=%.4f' % (train_loss[-1], train_acc[-1]))
 
-        test_acc.append(evaluate(model, test_loader))
-        it.set_description('Acc=%.4f(train),%.4f(test)' % (train_acc[-1], test_acc[-1]))
+    test_acc.append(evaluate(model, test_loader, tta_level=0))
+    print('tta_level=0 acc: %.4f' % test_acc[-1])
+    test_acc.append(evaluate(model, test_loader, tta_level=1))
+    print('tta_level=1 acc: %.4f' % test_acc[-1])
+    test_acc.append(evaluate(model, test_loader, tta_level=2))
+    print('tta_level=2 acc: %.4f' % test_acc[-1])
 
     log = dict(train_loss=train_loss, train_acc=train_acc, test_acc=test_acc)
     return model, log 
 
 if __name__ == '__main__':
 
+    with open(sys.argv[0]) as f:
+        code = f.read()
+
     train_augs = dict(flip=hyp['aug']['flip'], translate=hyp['aug']['translate'], cutout=hyp['aug']['cutout'])
     train_loader = CifarLoader('cifar10', train=True, batch_size=hyp['opt']['batch_size'], aug=train_augs)
 
-    model, log = train(train_loader)
-    print('Final acc: %.4f' % log['test_acc'][-1])
+    accs = []
+    for _ in range(10):
+        model, log = train(train_loader)
+        acc = log['test_acc'][-1]
+        accs.append(acc)
+    log = dict(hyp=hyp, code=code, accs=accs)
+
+    log_dir = os.path.join('logs', str(uuid.uuid4()))
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, 'log.pt')
+    print(os.path.abspath(log_path))
+    torch.save(log, os.path.join(log_dir, 'log.pt'))
 
