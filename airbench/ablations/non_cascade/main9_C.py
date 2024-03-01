@@ -11,7 +11,6 @@ import os
 import sys
 import uuid
 import math
-import copy
 import numpy as np
 
 import torch
