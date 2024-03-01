@@ -1,27 +1,23 @@
-# ResNet-18 training script optimized for time-to-96%.
-# 167s runtime on an A100; 13.35 PFLOPs.
-#
+# ResNet-18 training script optimized for time-to-94%.
 # Sample output:
 '''
-Training loss=0.0699 acc=0.9780: 100%|████████████████████| 80/80 [02:49<00:00,  2.11s/it]
-tta_level=0 acc: 0.9555
-tta_level=1 acc: 0.9590
-tta_level=2 acc: 0.9603
-Training loss=0.0509 acc=0.9820: 100%|████████████████████| 80/80 [02:47<00:00,  2.09s/it]
-tta_level=0 acc: 0.9532
-tta_level=1 acc: 0.9580
-tta_level=2 acc: 0.9592
-Training loss=0.0278 acc=0.9900: 100%|████████████████████| 80/80 [02:47<00:00,  2.09s/it]
-tta_level=0 acc: 0.9549
-tta_level=1 acc: 0.9567
-tta_level=2 acc: 0.9582
+Training loss=0.1252 acc=0.9580: 100%|████████████████████| 26/26 [00:54<00:00,  2.10s/it]
+tta_level=0 acc: 0.9343
+tta_level=1 acc: 0.9384
+tta_level=2 acc: 0.9406
+Training loss=0.1494 acc=0.9460: 100%|████████████████████| 26/26 [00:54<00:00,  2.10s/it]
+tta_level=0 acc: 0.9336
+tta_level=1 acc: 0.9385
+tta_level=2 acc: 0.9395
+Training loss=0.1669 acc=0.9360: 100%|████████████████████| 26/26 [00:54<00:00,  2.10s/it]
+tta_level=0 acc: 0.9353
+tta_level=1 acc: 0.9393
+tta_level=2 acc: 0.9405
 ...
 '''
-#
 # At tta_level=1:
-# Random flip (default) => 95.875% in n=100
-# Alterating flip => 95.885% in n=100
-# Both have stddev of 0.12%.
+# Random flip => 94.004 in n=200
+# Alternating flip => 94.039 in n=200
 
 #############################################
 #            Setup/Hyperparameters          #
@@ -40,7 +36,7 @@ torch.backends.cudnn.benchmark = True
 
 hyp = {
     'opt': {
-        'epochs': 80,
+        'epochs': 26,
         'batch_size': 500,
         'lr': 0.2,
         'momentum': 0.9,
