@@ -1,5 +1,5 @@
 # 96.74% in 375s runtime on an A100; 72.5 PFLOPs.
-# same arch as airbench_heavy. width increased to 256 and epochs to 100
+# same arch as airbench96. width increased to 256 and epochs to 100
 
 #############################################
 #            Setup/Hyperparameters          #
@@ -9,7 +9,6 @@ import os
 import sys
 import uuid
 import math
-import copy
 import numpy as np
 
 import torch
