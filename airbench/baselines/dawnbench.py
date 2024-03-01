@@ -1,4 +1,4 @@
-# dawnbench_dcpage.py
+# dawnbench.py
 # This script aims for exact equivalence to the final training procedure presented in David C. Page's post
 # https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/.
 #
