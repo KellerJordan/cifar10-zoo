@@ -4,7 +4,7 @@ We develop a variant of airbench which reaches 96% accuracy (~= full ResNet-18 t
 This is a harder target which requires 20x more compute.
 
 We use a larger network that contains 10 convolutional layers, residual connections, and a
-total of 12,721,208 parameters.
+total of 12.7M parameters.
 
 | Script | Description | Time | PFLOPs | Epochs |
 | - | - | - | - | - | 
