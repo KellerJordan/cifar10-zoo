@@ -1,6 +1,6 @@
 # airbench94.py
 #
-# Uncompiled variant of airbench94_compiled.py.
+# Uncompiled variant of airbench94_compiled.py
 
 #############################################
 #            Setup/Hyperparameters          #
