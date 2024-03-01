@@ -1,15 +1,16 @@
 # A ResNet-18 training script optimized for time-to-96%.
 # 180s runtime on an A100; 13.35 PFLOPs.
-# Doesn't quite reach 96%.
 #
-# tta_level=0 :
+# Sample output:
+#Acc=0.9760(train),0.9573(test): 100%|█████████████████████| 80/80 [02:59<00:00,  2.24s/it]
+#tta_level=0 acc: 0.9573
+#tta_level=1 acc: 0.9599
+#tta_level=2 acc: 0.9609
+#
+# At tta_level=0 :
 # 95.875% in n=100
 # with alternating flip instead of random, 95.885% in n=100
 # both have stddev of 0.12%.
-#
-# Sample output:
-#
-#Acc=0.9940(train),0.9604(test): 100%|█████████████████████| 80/80 [03:06<00:00,  2.33s/it]
 
 #############################################
 #            Setup/Hyperparameters          #
@@ -245,7 +246,7 @@ def make_rn18():
 ########################################
 
 @torch.no_grad
-def evaluate(model, loader, tta_level=hyp['net']['tta_level']):
+def evaluate(model, loader, tta_level=0):
 
     test_images = loader.normalize(loader.images)
     test_labels = loader.labels
@@ -253,7 +254,7 @@ def evaluate(model, loader, tta_level=hyp['net']['tta_level']):
     model.eval()
 
     def infer_basic(inputs, net):
-        return net(inputs).clone() # using .clone() here averts some kind of bug with torch.compile
+        return net(inputs).clone()
 
     def infer_mirror(inputs, net):
         return 0.5 * net(inputs) + 0.5 * net(inputs.flip(-1))
@@ -313,8 +314,14 @@ def train(train_loader, test_loader=None, epochs=hyp['opt']['epochs'], lr=hyp['o
             it.set_description('Acc=%.4f(train),%.4f(test)' % (train_acc[-1], test_acc[-1]))
 
         # only do full tta for final eval
-        test_acc.append(evaluate(model, test_loader, tta_level=(2 if epoch == epochs-1 else 0))
+        test_acc.append(evaluate(model, test_loader, tta_level=0))
         it.set_description('Acc=%.4f(train),%.4f(test)' % (train_acc[-1], test_acc[-1]))
+
+    print('tta_level=0 acc: %.4f' % test_acc[-1])
+    test_acc.append(evaluate(model, test_loader, tta_level=1))
+    print('tta_level=1 acc: %.4f' % test_acc[-1])
+    test_acc.append(evaluate(model, test_loader, tta_level=2))
+    print('tta_level=2 acc: %.4f' % test_acc[-1])
 
     log = dict(train_loss=train_loss, train_acc=train_acc, test_acc=test_acc)
     return model, log 
@@ -328,7 +335,7 @@ if __name__ == '__main__':
     train_loader = CifarLoader('cifar10', train=True, batch_size=hyp['opt']['batch_size'], aug=train_augs)
 
     accs = []
-    for _ in range(100):
+    for _ in range(10):
         model, log = train(train_loader)
         acc = log['test_acc'][-1]
         accs.append(acc)
