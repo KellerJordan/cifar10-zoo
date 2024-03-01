@@ -6,11 +6,16 @@
 #tta_level=0 acc: 0.9573
 #tta_level=1 acc: 0.9599
 #tta_level=2 acc: 0.9609
+#Acc=0.9880(train),0.9539(test): 100%|█████████████████████| 80/80 [02:55<00:00,  2.20s/it]
+#tta_level=0 acc: 0.9539
+#tta_level=1 acc: 0.9580
+#tta_level=2 acc: 0.9590
+# ..........
 #
-# At tta_level=0 :
-# 95.875% in n=100
-# with alternating flip instead of random, 95.885% in n=100
-# both have stddev of 0.12%.
+# At tta_level=0:
+# Random flip (default) -> 95.875% in n=100
+# Alterating flip -> 95.885% in n=100
+# Both have stddev of 0.12%.
 
 #############################################
 #            Setup/Hyperparameters          #
