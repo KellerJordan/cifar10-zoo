@@ -1,4 +1,4 @@
-# eaiser_airbench.py
+# airbench94_simple.py
 #
 # Simplified variant of airbench without compilation or lookahead optimization.
 
