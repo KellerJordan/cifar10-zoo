@@ -11,6 +11,10 @@ Training loss=0.0509 acc=0.9820: 100%|██████████████
 tta_level=0 acc: 0.9532
 tta_level=1 acc: 0.9580
 tta_level=2 acc: 0.9592
+Training loss=0.0278 acc=0.9900: 100%|████████████████████| 80/80 [02:47<00:00,  2.09s/it]
+tta_level=0 acc: 0.9549
+tta_level=1 acc: 0.9567
+tta_level=2 acc: 0.9582
 ...
 '''
 #
