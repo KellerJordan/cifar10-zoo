@@ -1,3 +1,5 @@
+import sys
+import hashlib
 import torch
 import torch as ch
 from torch.cuda.amp import GradScaler
@@ -62,7 +64,6 @@ Section('lr', 'lr scheduling').params(
 
 Section('logging', 'how to log stuff').params(
     folder=Param(str, 'log location', required=True),
-    log_level=Param(int, '0 if only at end 1 otherwise', default=1)
 )
 
 Section('validation', 'Validation parameters stuff').params(
@@ -122,8 +123,9 @@ def batch_flip_lr(inputs):
 
 def calc_hash(n):
     return int(hashlib.md5(bytes(str(n), 'utf-8')).hexdigest()[-8:], 16)
+seed = torch.randint(0, 372036854775808, size=()).item()
 def batch_detflip_lr(inputs, indices, epoch):
-    res = torch.tensor([calc_hash(i) for i in indices.tolist()])
+    res = torch.tensor([calc_hash(i + seed) for i in indices.flatten().tolist()]).to(inputs.device)
     flip_mask = ((res + epoch) % 2 == 0).view(-1, 1, 1, 1)
     return torch.where(flip_mask, inputs.flip(-1), inputs)
 
@@ -135,8 +137,14 @@ class ImageNetTrainer:
 
         self.train_loader = self.create_train_loader()
         self.val_loader = self.create_val_loader()
-        self.model, self.scaler = self.create_model_and_scaler()
-        self.create_optimizer()
+        self.model1, self.scaler1 = self.create_model_and_scaler()
+        self.model2, self.scaler2 = self.create_model_and_scaler()
+        self.model3, self.scaler3 = self.create_model_and_scaler()
+        self.model4, self.scaler4 = self.create_model_and_scaler()
+        self.optimizer1 = self.create_optimizer(self.model1)
+        self.optimizer2 = self.create_optimizer(self.model2)
+        self.optimizer3 = self.create_optimizer(self.model3)
+        self.optimizer4 = self.create_optimizer(self.model4)
         self.initialize_logger()
         
     @param('lr.lr_schedule_type')
@@ -170,23 +178,19 @@ class ImageNetTrainer:
     @param('training.momentum')
     @param('training.weight_decay')
     @param('training.label_smoothing')
-    def create_optimizer(self, momentum, weight_decay,
+    def create_optimizer(self, model, momentum, weight_decay,
                          label_smoothing):
 
         # Only do weight decay on non-batchnorm parameters
-        all_params = list(self.model.named_parameters())
+        all_params = list(model.named_parameters())
         bn_params = [v for k, v in all_params if ('bn' in k)]
         other_params = [v for k, v in all_params if not ('bn' in k)]
-        param_groups = [{
-            'params': bn_params,
-            'weight_decay': 0.
-        }, {
-            'params': other_params,
-            'weight_decay': weight_decay
-        }]
+        param_groups = [{'params': bn_params, 'weight_decay': 0.},
+                        {'params': other_params, 'weight_decay': weight_decay}]
 
-        self.optimizer = ch.optim.SGD(param_groups, lr=1, momentum=momentum)
         self.loss = ch.nn.CrossEntropyLoss(label_smoothing=label_smoothing)
+        optimizer = ch.optim.SGD(param_groups, lr=1, momentum=momentum)
+        return optimizer
 
     @param('data.train_dataset')
     @param('data.num_workers')
@@ -194,8 +198,7 @@ class ImageNetTrainer:
     @param('data.in_memory')
     def create_train_loader(self, train_dataset, num_workers, batch_size,
                             in_memory):
-        train_path = Path(train_dataset)
-        assert train_path.is_file()
+        assert Path(train_dataset).is_file()
 
         res = self.get_resolution(epoch=0)
         self.decoder = RandomResizedCropRGBImageDecoder((res, res))
@@ -212,15 +215,15 @@ class ImageNetTrainer:
         label_pipeline: List[Operation] = [
             IntDecoder(),
             ToTensor(),
-            ToDevice(ch.device(0)),
+            ToDevice(ch.device(0), non_blocking=True),
             Squeeze(),
         ]
 
-        order = OrderOption.QUASI_RANDOM
         loader = Loader(train_dataset,
                         batch_size=batch_size,
                         num_workers=num_workers,
-                        order=order,
+                        #order=OrderOption.QUASI_RANDOM,
+                        order=OrderOption.RANDOM,
                         os_cache=in_memory,
                         drop_last=True,
                         pipelines={
@@ -236,8 +239,8 @@ class ImageNetTrainer:
     @param('validation.resolution')
     def create_val_loader(self, val_dataset, num_workers, batch_size,
                           resolution):
-        val_path = Path(val_dataset)
-        assert val_path.is_file()
+        assert Path(val_dataset).is_file()
+
         res_tuple = (resolution, resolution)
         cropper = CenterCropRGBImageDecoder(res_tuple, ratio=DEFAULT_CROP_RATIO)
         image_pipeline = [
@@ -252,7 +255,7 @@ class ImageNetTrainer:
         label_pipeline = [
             IntDecoder(),
             ToTensor(),
-            ToDevice(ch.device(0)),
+            ToDevice(ch.device(0), non_blocking=True),
             Squeeze(),
         ]
 
@@ -268,36 +271,23 @@ class ImageNetTrainer:
         return loader
 
     @param('training.epochs')
-    @param('logging.log_level')
-    def train(self, epochs, log_level):
+    def train(self, epochs):
         for epoch in range(epochs):
             res = self.get_resolution(epoch)
             self.decoder.output_size = (res, res)
-            train_loss = self.train_loop(epoch)
+            self.train_loop(epoch)
 
-            if log_level > 0:
-                extra_dict = {
-                    'train_loss': train_loss,
-                    'epoch': epoch
-                }
-
-                self.eval_and_log(extra_dict)
-
-        self.eval_and_log({'epoch':epoch})
-        ch.save(self.model.state_dict(), self.log_folder / 'final_weights.pt')
-
-    def eval_and_log(self, extra_dict={}):
+        extra_dict = {'epoch': epoch}
         start_val = time.time()
         stats = self.val_loop()
         val_time = time.time() - start_val
-        self.log(dict({
-            'current_lr': self.optimizer.param_groups[0]['lr'],
-            'top_1': stats['top_1'],
-            'top_5': stats['top_5'],
-            'val_time': val_time
-        }, **extra_dict))
+        self.log(dict({'current_lr': self.optimizer1.param_groups[0]['lr'], 'val_time': val_time},
+                      **stats, **extra_dict))
 
-        return stats
+        ch.save(self.model1.state_dict(), self.log_folder / 'final_weights1.pt')
+        ch.save(self.model2.state_dict(), self.log_folder / 'final_weights2.pt')
+        ch.save(self.model3.state_dict(), self.log_folder / 'final_weights3.pt')
+        ch.save(self.model4.state_dict(), self.log_folder / 'final_weights4.pt')
 
     @param('model.arch')
     @param('training.use_blurpool')
@@ -316,11 +306,11 @@ class ImageNetTrainer:
 
         return model, scaler
 
-    @param('logging.log_level')
-    def train_loop(self, epoch, log_level):
-        model = self.model
-        model.train()
-        losses = []
+    def train_loop(self, epoch):
+        self.model1.train()
+        self.model2.train()
+        self.model3.train()
+        self.model4.train()
 
         lr_start, lr_end = self.get_lr(epoch), self.get_lr(epoch + 1)
         iters = len(self.train_loader)
@@ -329,58 +319,68 @@ class ImageNetTrainer:
         iterator = tqdm(self.train_loader)
         for ix, (images, target, indices) in enumerate(iterator):
 
-            images = batch_flip_lr(images)
-            #images = batch_detflip_lr(images, indices, epoch)
+            images1 = batch_flip_lr(images)
+            images2 = batch_detflip_lr(images, indices, epoch)
 
-            ### Training start
-            for param_group in self.optimizer.param_groups:
+            for param_group in self.optimizer1.param_groups:
+                param_group['lr'] = lrs[ix]
+            for param_group in self.optimizer2.param_groups:
+                param_group['lr'] = lrs[ix]
+            for param_group in self.optimizer3.param_groups:
+                param_group['lr'] = lrs[ix]
+            for param_group in self.optimizer4.param_groups:
                 param_group['lr'] = lrs[ix]
 
-            self.optimizer.zero_grad(set_to_none=True)
+            self.optimizer1.zero_grad(set_to_none=True)
+            self.optimizer2.zero_grad(set_to_none=True)
+            self.optimizer3.zero_grad(set_to_none=True)
+            self.optimizer4.zero_grad(set_to_none=True)
             with autocast():
-                output = self.model(images)
-                loss_train = self.loss(output, target)
+                loss_train1 = self.loss(self.model1(images1), target)
+                loss_train2 = self.loss(self.model2(images1), target)
+                loss_train3 = self.loss(self.model3(images2), target)
+                loss_train4 = self.loss(self.model4(images2), target)
 
-            self.scaler.scale(loss_train).backward()
-            self.scaler.step(self.optimizer)
-            self.scaler.update()
-            ### Training end
-
-            ### Logging start
-            if log_level > 0:
-                losses.append(loss_train.detach())
-
-                group_lrs = []
-                for _, group in enumerate(self.optimizer.param_groups):
-                    group_lrs.append(f'{group["lr"]:.3f}')
-
-                names = ['ep', 'iter', 'shape', 'lrs']
-                values = [epoch, ix, tuple(images.shape), group_lrs]
-                if log_level > 1:
-                    names += ['loss']
-                    values += [f'{loss_train.item():.3f}']
-
-                msg = ', '.join(f'{n}={v}' for n, v in zip(names, values))
-                iterator.set_description(msg)
-            ### Logging end
+            self.scaler1.scale(loss_train1).backward()
+            self.scaler1.step(self.optimizer1)
+            self.scaler1.update()
+            self.scaler2.scale(loss_train2).backward()
+            self.scaler2.step(self.optimizer2)
+            self.scaler2.update()
+            self.scaler3.scale(loss_train3).backward()
+            self.scaler3.step(self.optimizer3)
+            self.scaler3.update()
+            self.scaler4.scale(loss_train4).backward()
+            self.scaler4.step(self.optimizer4)
+            self.scaler4.update()
 
     @param('validation.lr_tta')
     def val_loop(self, lr_tta):
-        model = self.model
-        model.eval()
+        self.model1.eval()
+        self.model2.eval()
+        self.model3.eval()
+        self.model4.eval()
 
-        with ch.no_grad():
-            with autocast():
-                for images, target, indices in tqdm(self.val_loader):
-                    output = self.model(images)
-                    if lr_tta:
-                        output += self.model(ch.flip(images, dims=[3]))
+        with ch.no_grad(), autocast():
+            for images, target, _ in tqdm(self.val_loader):
+                output1 = self.model1(images)
+                output2 = self.model2(images)
+                output3 = self.model3(images)
+                output4 = self.model4(images)
+                if lr_tta:
+                    output1 += self.model1(ch.flip(images, dims=[3]))
+                    output2 += self.model2(ch.flip(images, dims=[3]))
+                    output3 += self.model3(ch.flip(images, dims=[3]))
+                    output4 += self.model4(ch.flip(images, dims=[3]))
 
-                    for k in ['top_1', 'top_5']:
-                        self.val_meters[k](output, target)
-
-                    loss_val = self.loss(output, target)
-                    self.val_meters['loss'](loss_val)
+                for k in ['top_1_model1', 'top_5_model1']:
+                    self.val_meters[k](output1, target)
+                for k in ['top_1_model2', 'top_5_model2']:
+                    self.val_meters[k](output2, target)
+                for k in ['top_1_model3', 'top_5_model3']:
+                    self.val_meters[k](output3, target)
+                for k in ['top_1_model4', 'top_5_model4']:
+                    self.val_meters[k](output4, target)
 
         stats = {k: m.compute().item() for k, m in self.val_meters.items()}
         [meter.reset() for meter in self.val_meters.values()]
@@ -389,9 +389,14 @@ class ImageNetTrainer:
     @param('logging.folder')
     def initialize_logger(self, folder):
         self.val_meters = {
-            'top_1': torchmetrics.Accuracy(task='multiclass', num_classes=1000).cuda(),
-            'top_5': torchmetrics.Accuracy(task='multiclass', num_classes=1000, top_k=5).cuda(),
-            'loss': MeanScalarMetric().cuda(),
+            'top_1_model1': torchmetrics.Accuracy(task='multiclass', num_classes=1000).cuda(),
+            'top_1_model2': torchmetrics.Accuracy(task='multiclass', num_classes=1000).cuda(),
+            'top_1_model3': torchmetrics.Accuracy(task='multiclass', num_classes=1000).cuda(),
+            'top_1_model4': torchmetrics.Accuracy(task='multiclass', num_classes=1000).cuda(),
+            'top_5_model1': torchmetrics.Accuracy(task='multiclass', num_classes=1000, top_k=5).cuda(),
+            'top_5_model2': torchmetrics.Accuracy(task='multiclass', num_classes=1000, top_k=5).cuda(),
+            'top_5_model3': torchmetrics.Accuracy(task='multiclass', num_classes=1000, top_k=5).cuda(),
+            'top_5_model4': torchmetrics.Accuracy(task='multiclass', num_classes=1000, top_k=5).cuda(),
         }
 
         folder = (Path(folder) / str(self.uid)).absolute()
@@ -401,12 +406,11 @@ class ImageNetTrainer:
         self.start_time = time.time()
 
         print(f'=> Logging in {self.log_folder}')
-        params = {
-            '.'.join(k): self.all_params[k] for k in self.all_params.entries.keys()
-        }
-
+        params = {'.'.join(k): self.all_params[k] for k in self.all_params.entries.keys()}
         with open(folder / 'params.json', 'w+') as handle:
             json.dump(params, handle)
+        with open(folder / 'code.txt', 'w') as f:
+            f.write(code)
 
     def log(self, content):
         print(f'=> Log: {content}')
@@ -419,22 +423,7 @@ class ImageNetTrainer:
             }) + '\n')
             fd.flush()
 
-# Utils
-class MeanScalarMetric(torchmetrics.Metric):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
 
-        self.add_state('sum', default=ch.tensor(0.), dist_reduce_fx='sum')
-        self.add_state('count', default=ch.tensor(0), dist_reduce_fx='sum')
-
-    def update(self, sample: ch.Tensor):
-        self.sum += sample.sum()
-        self.count += sample.numel()
-
-    def compute(self):
-        return self.sum.float() / self.count
-
-# Running
 def make_config(quiet=False):
     config = get_current_config()
     parser = ArgumentParser(description='Fast imagenet training')
@@ -445,6 +434,8 @@ def make_config(quiet=False):
         config.summary()
 
 if __name__ == "__main__":
+    with open(sys.argv[0]) as f:
+        code = f.read()
     make_config()
     ImageNetTrainer().train()
 
