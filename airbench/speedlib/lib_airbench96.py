@@ -16,12 +16,6 @@ from .utils import train, evaluate, PrepadCifarLoader
 #            Setup/Hyperparameters          #
 #############################################
 
-import os
-import sys
-import uuid
-import math
-import numpy as np
-
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -42,9 +36,9 @@ torch.backends.cudnn.benchmark = True
 
 hyp = {
     'opt': {
-        'train_epochs': 40,
+        'train_epochs': 40.0,
         'batch_size': 1024,
-        'lr': 9.0,                 # learning rate per 1024 examples
+        'lr': 9.0,                  # learning rate per 1024 examples
         'momentum': 0.85,
         'weight_decay': 0.0153,     # weight decay per 1024 examples (decoupled from learning rate)
         'bias_scaler': 64.0,        # scales up learning rate (but not weight decay) for BatchNorm biases
