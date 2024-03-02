@@ -1,4 +1,5 @@
 # 93% in roughly 1/4 of the FLOPs of 94% (but only ~40% less wallclock time on A100)
+# 93.00 in n=50
 
 from .utils import train, evaluate, PrepadCifarLoader
 
