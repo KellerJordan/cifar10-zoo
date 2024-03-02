@@ -140,11 +140,11 @@ def make_net():
 ############################################
 
 def train94(train_loader=PrepadCifarLoader('cifar10', train=True, batch_size=hyp['opt']['batch_size'], aug=hyp['aug']),
-          epochs=hyp['opt']['train_epochs'], label_smoothing=hyp['opt']['label_smoothing'],
-          learning_rate=hyp['opt']['lr'], bias_scaler=hyp['opt']['bias_scaler'],
-          momentum=hyp['opt']['momentum'], weight_decay=hyp['opt']['weight_decay'],
-          whiten_bias_epochs=hyp['opt']['whiten_bias_epochs'], tta_level=hyp['net']['tta_level'],
-          make_net=make_net, run=0, verbose=True):
+            epochs=hyp['opt']['train_epochs'], label_smoothing=hyp['opt']['label_smoothing'],
+            learning_rate=hyp['opt']['lr'], bias_scaler=hyp['opt']['bias_scaler'],
+            momentum=hyp['opt']['momentum'], weight_decay=hyp['opt']['weight_decay'],
+            whiten_bias_epochs=hyp['opt']['whiten_bias_epochs'], tta_level=hyp['net']['tta_level'],
+            make_net=make_net, run=0, verbose=True):
 
     return train(train_loader, epochs, label_smoothing, learning_rate, bias_scaler, momentum, weight_decay,
                  whiten_bias_epochs, tta_level, make_net, run, verbose)

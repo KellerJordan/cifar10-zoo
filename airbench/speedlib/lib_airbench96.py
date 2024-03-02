@@ -61,7 +61,7 @@ hyp = {
             'kernel_size': 2,
         },
         'batchnorm_momentum': 0.6,
-        'base_width': 128,
+        'base_width': 64,
         'scaling_factor': 1/9,
         'tta_level': 2,         # the level of test-time augmentation: 0=none, 1=mirror, 2=mirror+translate
     },
@@ -135,9 +135,9 @@ class ConvGroup(nn.Module):
 
 def make_net():
     widths = {
-        'block1': (1 * hyp['net']['base_width']), # 64  w/ width at base value
-        'block2': (4 * hyp['net']['base_width']), # 256 w/ width at base value
-        'block3': (4 * hyp['net']['base_width']), # 256 w/ width at base value
+        'block1': (2 * hyp['net']['base_width']), # 128 w/ width at base value
+        'block2': (8 * hyp['net']['base_width']), # 512 w/ width at base value
+        'block3': (8 * hyp['net']['base_width']), # 512 w/ width at base value
     }
     whiten_conv_width = 2 * 3 * hyp['net']['whitening']['kernel_size']**2
     net = nn.Sequential(
@@ -164,11 +164,11 @@ def make_net():
 ############################################
 
 def train96(train_loader=PrepadCifarLoader('cifar10', train=True, batch_size=hyp['opt']['batch_size'], aug=hyp['aug']),
-          epochs=hyp['opt']['train_epochs'], label_smoothing=hyp['opt']['label_smoothing'],
-          learning_rate=hyp['opt']['lr'], bias_scaler=hyp['opt']['bias_scaler'],
-          momentum=hyp['opt']['momentum'], weight_decay=hyp['opt']['weight_decay'],
-          whiten_bias_epochs=hyp['opt']['whiten_bias_epochs'], tta_level=hyp['net']['tta_level'],
-          make_net=make_net, run=0, verbose=True):
+            epochs=hyp['opt']['train_epochs'], label_smoothing=hyp['opt']['label_smoothing'],
+            learning_rate=hyp['opt']['lr'], bias_scaler=hyp['opt']['bias_scaler'],
+            momentum=hyp['opt']['momentum'], weight_decay=hyp['opt']['weight_decay'],
+            whiten_bias_epochs=hyp['opt']['whiten_bias_epochs'], tta_level=hyp['net']['tta_level'],
+            make_net=make_net, run=0, verbose=True):
 
     return train(train_loader, epochs, label_smoothing, learning_rate, bias_scaler, momentum, weight_decay,
                  whiten_bias_epochs, tta_level, make_net, run, verbose)

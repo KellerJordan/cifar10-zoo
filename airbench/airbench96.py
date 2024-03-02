@@ -65,7 +65,7 @@ hyp = {
             'kernel_size': 2,
         },
         'batchnorm_momentum': 0.6,
-        'base_width': 128,
+        'base_width': 64,
         'scaling_factor': 1/9,
         'tta_level': 2,         # the level of test-time augmentation: 0=none, 1=mirror, 2=mirror+translate
     },
@@ -263,9 +263,9 @@ class ConvGroup(nn.Module):
 
 def make_net():
     widths = {
-        'block1': (1 * hyp['net']['base_width']), # 128 w/ width at base value
-        'block2': (4 * hyp['net']['base_width']), # 512 w/ width at base value
-        'block3': (4 * hyp['net']['base_width']), # 512 w/ width at base value
+        'block1': (2 * hyp['net']['base_width']), # 128 w/ width at base value
+        'block2': (8 * hyp['net']['base_width']), # 512 w/ width at base value
+        'block3': (8 * hyp['net']['base_width']), # 512 w/ width at base value
     }
     whiten_conv_width = 2 * 3 * hyp['net']['whitening']['kernel_size']**2
     net = nn.Sequential(
