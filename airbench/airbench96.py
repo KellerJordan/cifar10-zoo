@@ -263,9 +263,9 @@ class ConvGroup(nn.Module):
 
 def make_net():
     widths = {
-        'block1': (1 * hyp['net']['base_width']), # 64  w/ width at base value
-        'block2': (4 * hyp['net']['base_width']), # 256 w/ width at base value
-        'block3': (4 * hyp['net']['base_width']), # 256 w/ width at base value
+        'block1': (1 * hyp['net']['base_width']), # 128 w/ width at base value
+        'block2': (4 * hyp['net']['base_width']), # 512 w/ width at base value
+        'block3': (4 * hyp['net']['base_width']), # 512 w/ width at base value
     }
     whiten_conv_width = 2 * 3 * hyp['net']['whitening']['kernel_size']**2
     net = nn.Sequential(
