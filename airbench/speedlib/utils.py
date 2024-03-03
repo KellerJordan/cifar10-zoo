@@ -98,22 +98,23 @@ def batch_cutout(inputs, size):
 
 class PrepadCifarLoader:
 
-    def __init__(self, path, train=True, batch_size=500, aug=None, drop_last=None, shuffle=None, gpu=0):
+    def __init__(self, path, train=True, batch_size=500, aug=None, drop_last=None, shuffle=None, detflip=True, gpu=0):
+
         data_path = os.path.join(path, 'train.pt' if train else 'test.pt')
         if not os.path.exists(data_path):
             dset = torchvision.datasets.CIFAR10(path, download=True, train=train)
             images = torch.tensor(dset.data)
             labels = torch.tensor(dset.targets)
             torch.save({'images': images, 'labels': labels, 'classes': dset.classes}, data_path)
-
         data = torch.load(data_path, map_location=torch.device(gpu))
+
+        self.epoch = 0
         self.images, self.labels, self.classes = data['images'], data['labels'], data['classes']
         # It's faster to load+process uint8 data than to load preprocessed fp16 data
         self.images = (self.images.half() / 255).permute(0, 3, 1, 2).to(memory_format=torch.channels_last)
 
         self.normalize = T.Normalize(CIFAR_MEAN, CIFAR_STD)
         self.proc_images = {} # Saved results of image processing to be done on the first epoch
-        self.epoch = 0
 
         self.aug = aug or {}
         for k in self.aug.keys():
@@ -122,6 +123,7 @@ class PrepadCifarLoader:
         self.batch_size = batch_size
         self.drop_last = train if drop_last is None else drop_last
         self.shuffle = train if shuffle is None else shuffle
+        self.detflip = detflip
 
     def __len__(self):
         return len(self.images)//self.batch_size if self.drop_last else math.ceil(len(self.images)/self.batch_size)
@@ -129,7 +131,7 @@ class PrepadCifarLoader:
     def __setattr__(self, k, v):
         if k in ('images', 'labels'):
             assert self.epoch == 0, 'Changing images or labels is only unsupported before iteration.'
-        setattr(self, k, v)
+        super().__setattr__(k, v)
 
     def __iter__(self):
 
@@ -151,8 +153,11 @@ class PrepadCifarLoader:
             images = self.proc_images['norm']
         # Flip all images together every other epoch. This increases diversity relative to random flipping
         if self.aug.get('flip', False):
-            if self.epoch % 2 == 1:
-                images = images.flip(-1)
+            if self.detflip:
+                if self.epoch % 2 == 1:
+                    images = images.flip(-1)
+            else:
+                images = batch_flip_lr(images)
         if self.aug.get('cutout', 0) > 0:
             images = batch_cutout(images, self.aug['cutout'])
 
