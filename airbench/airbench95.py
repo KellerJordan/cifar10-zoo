@@ -45,14 +45,14 @@ hyp = {
         'momentum': 0.85,
         'weight_decay': 0.0153,     # weight decay per 1024 examples (decoupled from learning rate)
         'bias_scaler': 64.0,        # scales up learning rate (but not weight decay) for BatchNorm biases
-        'label_smoothing': 0.0,
+        'label_smoothing': 0.2,
         'ema': {
             'start_epochs': 3,
             'decay_base': 0.95,
             'decay_pow': 3.,
             'every_n_steps': 5,
         },
-        'whiten_bias_epochs': 15,    # how many epochs to train the whitening layer bias before freezing
+        'whiten_bias_epochs': 3,    # how many epochs to train the whitening layer bias before freezing
     },
     'aug': {
         'flip': True,
