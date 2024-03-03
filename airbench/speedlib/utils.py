@@ -125,6 +125,11 @@ class PrepadCifarLoader:
 
     def __len__(self):
         return len(self.images)//self.batch_size if self.drop_last else math.ceil(len(self.images)/self.batch_size)
+    
+    def __setattr__(self, k, v):
+        if k in ('images', 'labels'):
+            assert self.epoch == 0, 'Changing images or labels is only unsupported before iteration.'
+        setattr(self, k, v)
 
     def __iter__(self):
 
@@ -320,32 +325,34 @@ def train(train_loader, epochs, label_smoothing, learning_rate, bias_scaler, mom
         torch.cuda.synchronize()
         total_time_seconds += 1e-3 * starter.elapsed_time(ender)
 
-        ####################
-        #    Evaluation    #
-        ####################
-
-        # Save the accuracy and loss from the last training batch of the epoch
-        train_acc = (outputs.detach().argmax(1) == labels).float().mean().item()
-        train_loss = loss.item() / batch_size
-
-        val_acc = evaluate(model, test_loader, tta_level=0)
-        tta_val_acc = None
-
         if verbose:
+
+            ####################
+            #    Evaluation    #
+            ####################
+
+            # Save the accuracy and loss from the last training batch of the epoch
+            train_acc = (outputs.detach().argmax(1) == labels).float().mean().item()
+            train_loss = loss.item() / batch_size
+
+            val_acc = evaluate(model, test_loader, tta_level=0)
+            tta_val_acc = None
+
             print_training_details(locals(), is_final_entry=False)
             run = None # Only print the run number once
 
-    ####################
-    #  TTA Evaluation  #
-    ####################
-
-    starter.record()
-    tta_val_acc = evaluate(model, test_loader, tta_level)
-    ender.record()
-    torch.cuda.synchronize()
-    total_time_seconds += 1e-3 * starter.elapsed_time(ender)
-
     if verbose:
+
+        ####################
+        #  TTA Evaluation  #
+        ####################
+
+        starter.record()
+        tta_val_acc = evaluate(model, test_loader, tta_level)
+        ender.record()
+        torch.cuda.synchronize()
+        total_time_seconds += 1e-3 * starter.elapsed_time(ender)
+
         epoch = 'eval'
         print_training_details(locals(), is_final_entry=True)
 
