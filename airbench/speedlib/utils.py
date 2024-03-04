@@ -96,7 +96,7 @@ def batch_cutout(inputs, size):
     cutout_masks = make_random_square_masks(inputs, size)
     return inputs.masked_fill(cutout_masks, 0)
 
-class PrepadCifarLoader:
+class CifarLoader:
 
     def __init__(self, path, train=True, batch_size=500, aug=None, drop_last=None, shuffle=None, detflip=True, gpu=0):
 
