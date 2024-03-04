@@ -256,7 +256,7 @@ def train(train_loader, epochs, label_smoothing, learning_rate, bias_scaler, mom
 
     loss_fn = nn.CrossEntropyLoss(label_smoothing=label_smoothing, reduction='none')
 
-    test_loader = PrepadCifarLoader('cifar10', train=False, batch_size=2000)
+    test_loader = CifarLoader('cifar10', train=False, batch_size=2000)
 
     total_train_steps = math.ceil(len(train_loader) * epochs)
     lr_schedule = np.interp(np.arange(1+total_train_steps),
