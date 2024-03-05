@@ -241,6 +241,8 @@ def print_training_details(variables, is_final_entry):
 def train(train_loader, epochs, label_smoothing, learning_rate, bias_scaler, momentum, weight_decay,
           whiten_bias_epochs, tta_level, make_net, run, verbose):
 
+    train_loader.epoch = 0
+
     if run == 0 and verbose:
         print_columns(logging_columns_list, is_head=True)
 
