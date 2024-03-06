@@ -1,3 +1,5 @@
+# Runs in 96.7s on an NVIDIA A100
+
 import copy
 from itertools import count
 import numpy as np

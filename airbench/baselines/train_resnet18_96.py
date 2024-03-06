@@ -1,5 +1,6 @@
 # ResNet-18 training script optimized for time-to-96%.
-# 167s runtime on an A100; 13.35 PFLOPs.
+# Runs in 1.95 * epochs seconds on an NVIDIA A100 = 156s at 80 epochs.
+# 13.35 PFLOPs.
 #
 # Sample output:
 '''

@@ -2,7 +2,7 @@
 # This script aims for exact equivalence to the final training procedure presented in David C. Page's post
 # https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/.
 #
-# It runs in 14 seconds on an NVIDIA A100, and yields a mean accuracy of 94.09% (across n=300 runs).
+# It runs in 14.0 seconds on an NVIDIA A100, and yields a mean accuracy of 94.09% (across n=300 runs).
 # David's original code runs in the same time and yields a mean accuracy of 94.10% (across n=400 runs) --
 # a statistically insigificant difference (p=0.44).
 #
