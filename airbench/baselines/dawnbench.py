@@ -2,7 +2,7 @@
 # This script aims for exact equivalence to the final training procedure presented in David C. Page's post
 # https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/.
 #
-# It runs in 15 seconds on an NVIDIA A100, and yields a mean accuracy of 94.09% (across n=300 runs).
+# It runs in 14 seconds on an NVIDIA A100, and yields a mean accuracy of 94.09% (across n=300 runs).
 # David's original code runs in the same time and yields a mean accuracy of 94.10% (across n=400 runs) --
 # a statistically insigificant difference (p=0.44).
 #
@@ -332,6 +332,9 @@ def main(run):
         #    Evaluation    #
         ####################
 
+        if epoch == epochs - 1:
+            starter.record()
+
         ## save the accuracy and loss from the last training batch of the epoch
         train_acc = (outputs.detach().argmax(-1) == labels).float().mean().item()
         train_loss = loss.item() / batch_size
@@ -357,6 +360,11 @@ def main(run):
             val_loss = torch.stack(loss_list).mean().item()
             ema_val_acc = torch.stack(acc_list_ema).mean().item()
             tta_ema_val_acc = torch.stack(acc_list_ema_tta).mean().item()
+
+        if epoch == epochs - 1:
+            ender.record()
+            torch.cuda.synchronize()
+            total_time_seconds += 1e-3 * starter.elapsed_time(ender)
 
         print_training_details(locals(), is_final_entry=(epoch == epochs-1))
         run = None # don't print run after first iteration
