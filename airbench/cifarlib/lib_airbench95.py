@@ -1,5 +1,13 @@
-# 93% in roughly 1/4 of the FLOPs of 94% (but only ~40% less wallclock time on A100)
-# 93.00 in n=50
+# A variant of airbench optimized for time-to-95%.
+# 10.8s runtime on an A100; 1.39 PFLOPs.
+# Evidence: 95.01 average accuracy in n=200 runs.
+# If random flip is used instead of alternating, then decays to 94.95 average accuracy in n=100 runs.
+# With random flip and 16 epochs instead of 15, we get 94.97 in n=100 runs.
+# With random flip and 17, we get 95.01 in n=100 runs.
+#
+# Changes relative to airbench:
+# - Increased width and reduced learning rate.
+# - Increased training duration to 15 epochs.
 
 from .utils import train, evaluate, CifarLoader
 
@@ -27,9 +35,9 @@ torch.backends.cudnn.benchmark = True
 
 hyp = {
     'opt': {
-        'train_epochs': 11.0,
+        'train_epochs': 15.0,
         'batch_size': 1024,
-        'lr': 11.5,                 # learning rate per 1024 examples
+        'lr': 10.0,                 # learning rate per 1024 examples
         'momentum': 0.85,
         'weight_decay': 0.0153,     # weight decay per 1024 examples (decoupled from learning rate)
         'bias_scaler': 64.0,        # scales up learning rate (but not weight decay) for BatchNorm biases
@@ -112,9 +120,9 @@ class ConvGroup(nn.Module):
 
 def make_net():
     widths = {
-        'block1': (1 * hyp['net']['base_width']), # 64  w/ width at base value
-        'block2': (2 * hyp['net']['base_width']), # 128 w/ width at base value
-        'block3': (2 * hyp['net']['base_width']), # 128 w/ width at base value
+        'block1': (2 * hyp['net']['base_width']), # 128 w/ width at base value
+        'block2': (6 * hyp['net']['base_width']), # 384 w/ width at base value
+        'block3': (6 * hyp['net']['base_width']), # 384 w/ width at base value
     }
     whiten_conv_width = 2 * 3 * hyp['net']['whitening']['kernel_size']**2
     net = nn.Sequential(
@@ -140,7 +148,7 @@ def make_net():
 #             Train and Eval               #
 ############################################
 
-def train93(train_loader=CifarLoader('cifar10', train=True, batch_size=hyp['opt']['batch_size'], aug=hyp['aug']),
+def airbench95(train_loader=CifarLoader('cifar10', train=True, batch_size=hyp['opt']['batch_size'], aug=hyp['aug']),
             epochs=hyp['opt']['train_epochs'], label_smoothing=hyp['opt']['label_smoothing'],
             learning_rate=hyp['opt']['lr'], bias_scaler=hyp['opt']['bias_scaler'],
             momentum=hyp['opt']['momentum'], weight_decay=hyp['opt']['weight_decay'],

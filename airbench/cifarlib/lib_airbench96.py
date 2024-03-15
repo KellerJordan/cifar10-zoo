@@ -1,13 +1,14 @@
-# A variant of airbench optimized for time-to-95%.
-# 10.8s runtime on an A100; 1.39 PFLOPs.
-# Evidence: 95.01 average accuracy in n=200 runs.
-# If random flip is used instead of alternating, then decays to 94.95 average accuracy in n=100 runs.
-# With random flip and 16 epochs instead of 15, we get 94.97 in n=100 runs.
-# With random flip and 17, we get 95.01 in n=100 runs.
+# A variant of airbench optimized for time-to-96%.
+# 49s runtime on an A100; 7.46 PFLOPs.
+# Evidence: 96.05 average accuracy in n=200 runs.
+# If random flip is used instead of alternating, then decays to 96.01 average accuracy in n=200 runs.
 #
 # Changes relative to airbench:
-# - Increased width and reduced learning rate.
-# - Increased training duration to 15 epochs.
+# - Doubled width and reduced learning rate.
+# - Added extra layer to each ConvBlock. The network now contains 10 conv layers.
+# - Added residual connections over the last two conv layers in each ConvBlock.
+# - Added 12-pixel cutout data augmentation and increased random-translation strength from 2 to 4 pixels.
+# - Increased training duration to 40 epochs.
 
 from .utils import train, evaluate, CifarLoader
 
@@ -35,9 +36,9 @@ torch.backends.cudnn.benchmark = True
 
 hyp = {
     'opt': {
-        'train_epochs': 15.0,
+        'train_epochs': 40.0,
         'batch_size': 1024,
-        'lr': 10.0,                 # learning rate per 1024 examples
+        'lr': 9.0,                  # learning rate per 1024 examples
         'momentum': 0.85,
         'weight_decay': 0.0153,     # weight decay per 1024 examples (decoupled from learning rate)
         'bias_scaler': 64.0,        # scales up learning rate (but not weight decay) for BatchNorm biases
@@ -46,7 +47,8 @@ hyp = {
     },
     'aug': {
         'flip': True,
-        'translate': 2,
+        'translate': 4,
+        'cutout': 12,
     },
     'net': {
         'whitening': {
@@ -102,6 +104,8 @@ class ConvGroup(nn.Module):
         self.norm1 = BatchNorm(channels_out)
         self.conv2 = Conv(channels_out, channels_out)
         self.norm2 = BatchNorm(channels_out)
+        self.conv3 = Conv(channels_out, channels_out)
+        self.norm3 = BatchNorm(channels_out)
         self.activ = nn.GELU()
 
     def forward(self, x):
@@ -109,9 +113,14 @@ class ConvGroup(nn.Module):
         x = self.pool(x)
         x = self.norm1(x)
         x = self.activ(x)
+        x0 = x
         x = self.conv2(x)
         x = self.norm2(x)
         x = self.activ(x)
+        x = self.conv3(x)
+        x = self.norm3(x)
+        x = self.activ(x)
+        x += x0
         return x
 
 #############################################
@@ -121,8 +130,8 @@ class ConvGroup(nn.Module):
 def make_net():
     widths = {
         'block1': (2 * hyp['net']['base_width']), # 128 w/ width at base value
-        'block2': (6 * hyp['net']['base_width']), # 384 w/ width at base value
-        'block3': (6 * hyp['net']['base_width']), # 384 w/ width at base value
+        'block2': (8 * hyp['net']['base_width']), # 512 w/ width at base value
+        'block3': (8 * hyp['net']['base_width']), # 512 w/ width at base value
     }
     whiten_conv_width = 2 * 3 * hyp['net']['whitening']['kernel_size']**2
     net = nn.Sequential(
@@ -148,7 +157,7 @@ def make_net():
 #             Train and Eval               #
 ############################################
 
-def train95(train_loader=CifarLoader('cifar10', train=True, batch_size=hyp['opt']['batch_size'], aug=hyp['aug']),
+def airbench96(train_loader=CifarLoader('cifar10', train=True, batch_size=hyp['opt']['batch_size'], aug=hyp['aug']),
             epochs=hyp['opt']['train_epochs'], label_smoothing=hyp['opt']['label_smoothing'],
             learning_rate=hyp['opt']['lr'], bias_scaler=hyp['opt']['bias_scaler'],
             momentum=hyp['opt']['momentum'], weight_decay=hyp['opt']['weight_decay'],
