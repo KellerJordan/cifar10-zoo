@@ -5,7 +5,7 @@ from torch import nn
 import torch.nn.functional as F
 
 @torch.no_grad
-def infer(model, loader, tta_level=1):
+def infer(model, loader, tta_level=0):
     
     test_images = loader.normalize(loader.images)
     
@@ -96,7 +96,7 @@ def batch_cutout(inputs, size):
     cutout_masks = make_random_square_masks(inputs, size)
     return inputs.masked_fill(cutout_masks, 0)
 
-class CifarLoader:
+class Loader:
 
     def __init__(self, path, train=True, batch_size=500, aug=None, drop_last=None, shuffle=None, detflip=True, gpu=0):
 
@@ -258,7 +258,7 @@ def train(train_loader, epochs, label_smoothing, learning_rate, bias_scaler, mom
 
     loss_fn = nn.CrossEntropyLoss(label_smoothing=label_smoothing, reduction='none')
 
-    test_loader = CifarLoader('cifar10', train=False, batch_size=2000)
+    test_loader = Loader('cifar10', train=False, batch_size=2000)
 
     total_train_steps = math.ceil(len(train_loader) * epochs)
     lr_schedule = np.interp(np.arange(1+total_train_steps),

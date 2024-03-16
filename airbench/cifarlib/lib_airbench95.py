@@ -9,7 +9,7 @@
 # - Increased width and reduced learning rate.
 # - Increased training duration to 15 epochs.
 
-from .utils import train, evaluate, CifarLoader
+from .utils import train, evaluate, Loader
 
 #############################################
 #            Setup/Hyperparameters          #
@@ -148,7 +148,7 @@ def make_net():
 #             Train and Eval               #
 ############################################
 
-def airbench95(train_loader=CifarLoader('cifar10', train=True, batch_size=hyp['opt']['batch_size'], aug=hyp['aug']),
+def airbench95(train_loader=Loader('cifar10', train=True, batch_size=hyp['opt']['batch_size'], aug=hyp['aug']),
             epochs=hyp['opt']['train_epochs'], label_smoothing=hyp['opt']['label_smoothing'],
             learning_rate=hyp['opt']['lr'], bias_scaler=hyp['opt']['bias_scaler'],
             momentum=hyp['opt']['momentum'], weight_decay=hyp['opt']['weight_decay'],

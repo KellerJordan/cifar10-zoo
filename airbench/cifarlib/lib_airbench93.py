@@ -1,7 +1,7 @@
 # 93% in roughly 1/4 of the FLOPs of 94% (but only ~40% less wallclock time on A100)
 # 93.00 in n=50
 
-from .utils import train, evaluate, CifarLoader
+from .utils import train, evaluate, Loader
 
 #############################################
 #            Setup/Hyperparameters          #
@@ -140,7 +140,7 @@ def make_net():
 #             Train and Eval               #
 ############################################
 
-def airbench93(train_loader=CifarLoader('cifar10', train=True, batch_size=hyp['opt']['batch_size'], aug=hyp['aug']),
+def airbench93(train_loader=Loader('cifar10', train=True, batch_size=hyp['opt']['batch_size'], aug=hyp['aug']),
             epochs=hyp['opt']['train_epochs'], label_smoothing=hyp['opt']['label_smoothing'],
             learning_rate=hyp['opt']['lr'], bias_scaler=hyp['opt']['bias_scaler'],
             momentum=hyp['opt']['momentum'], weight_decay=hyp['opt']['weight_decay'],
