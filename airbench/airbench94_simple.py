@@ -322,7 +322,7 @@ def main(run):
         return m[indices] * x + b[indices]
 
     total_train_steps = ceil(len(train_loader) * epochs)
-    lr_schedule = triangle(total_train_steps, start=0.2, end=0.07, peak=0.23)
+    lr_schedule = triangle(total_train_steps, start=0.2, end=0, peak=0.2)
 
     model = make_net()
     current_steps = 0
