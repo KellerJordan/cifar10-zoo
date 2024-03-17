@@ -13,12 +13,13 @@
 import os
 import sys
 import uuid
-import math
-import numpy as np
+from math import ceil
 
 import torch
 from torch import nn
 import torch.nn.functional as F
+import torchvision
+import torchvision.transforms as T
 
 torch.backends.cudnn.benchmark = True
 
@@ -71,12 +72,6 @@ hyp = {
 #############################################
 
 # https://github.com/KellerJordan/cifar10-loader/blob/master/quick_cifar/loader.py
-import os
-from math import ceil
-import torch
-import torch.nn.functional as F
-import torchvision
-import torchvision.transforms as T
 
 CIFAR_MEAN = torch.tensor((0.4914, 0.4822, 0.4465))
 CIFAR_STD = torch.tensor((0.2470, 0.2435, 0.2616))
@@ -105,7 +100,7 @@ def batch_crop(images, crop_size):
             images_out[mask] = images_tmp[mask, :, :, r+s:r+s+crop_size]
     return images_out
 
-class PrepadCifarLoader:
+class CifarLoader:
 
     def __init__(self, path, train=True, batch_size=500, aug=None, drop_last=None, shuffle=None, gpu=0):
         data_path = os.path.join(path, 'train.pt' if train else 'test.pt')
@@ -337,16 +332,24 @@ def main(run):
     loss_fn = nn.CrossEntropyLoss(label_smoothing=hyp['opt']['label_smoothing'], reduction='none')
 
     train_augs = dict(flip=hyp['aug']['flip'], translate=hyp['aug']['translate'])
-    train_loader = PrepadCifarLoader('cifar10', train=True, batch_size=batch_size, aug=train_augs)
-    test_loader = PrepadCifarLoader('cifar10', train=False, batch_size=2000)
+    train_loader = CifarLoader('cifar10', train=True, batch_size=batch_size, aug=train_augs)
+    test_loader = CifarLoader('cifar10', train=False, batch_size=2000)
     if run == 'warmup':
         # The only purpose of the first run is to warmup, so we can use dummy data
         train_loader.labels = torch.randint(0, 10, size=(len(train_loader.labels),), device=train_loader.labels.device)
 
-    total_train_steps = math.ceil(len(train_loader) * epochs)
-    lr_schedule = np.interp(np.arange(1+total_train_steps),
-                            [0, int(0.23 * total_train_steps), total_train_steps],
-                            [0.2, 1, 0.07]) # triangular learning rate schedule
+    def triangle(steps, start=0, end=0, peak=0.5):
+        xp = torch.tensor([0, int(peak * steps), steps])
+        fp = torch.tensor([start, 1, end])
+        x = torch.arange(1+steps)
+        m = (fp[1:] - fp[:-1]) / (xp[1:] - xp[:-1])
+        b = fp[:-1] - (m * xp[:-1])
+        indices = torch.sum(torch.ge(x[:, None], xp[None, :]), 1) - 1
+        indices = torch.clamp(indices, 0, len(m) - 1)
+        return m[indices] * x + b[indices]
+
+    total_train_steps = ceil(len(train_loader) * epochs)
+    lr_schedule = triangle(total_train_steps, start=0.2, end=0.07, peak=0.23)
 
     model = make_net()
     lookahead_state = None
@@ -373,7 +376,7 @@ def main(run):
     torch.cuda.synchronize()
     total_time_seconds += 1e-3 * starter.elapsed_time(ender)
 
-    for epoch in range(math.ceil(epochs)):
+    for epoch in range(ceil(epochs)):
 
         model[0].bias.requires_grad = (epoch < hyp['opt']['whiten_bias_epochs'])
 
