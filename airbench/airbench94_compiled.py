@@ -1,7 +1,7 @@
 # airbench_cifar10.py
 #
 # This script is designed to reach 94% accuracy on the CIFAR-10 test-set in the shortest possible time
-# after first seeing the training set. It runs in 3.5 seconds on a single NVIDIA A100.
+# after first seeing the training set. It runs in 3.29 seconds on a single NVIDIA A100.
 #
 # We use the following methods:
 #
@@ -37,15 +37,15 @@
 # To confirm that the mean accuracy is above 94%, we ran a test of n=700 runs, which yielded an
 # average accuracy of 94.02% (p<0.0001 for the true mean being below 94%, via t-test).
 #
-# We recorded the runtime of 3.5 seconds on an NVIDIA A100-SXM4-80GB with the following nvidia-smi:
-# NVIDIA-SMI 515.105.01   Driver Version: 515.105.01   CUDA Version: 11.7
-# torch.__version__ == '2.1.2+cu118'
+# We recorded the runtime of 3.29 seconds on an NVIDIA A100-SXM4-80GB with the following nvidia-smi:
+# NVIDIA-SMI 525.147.05   Driver Version: 525.147.05   CUDA Version: 12.0
+# torch.__version__ == '2.2.1'
 #
-# Note that the first time this script is run, compilation takes up to two minutes. Without the usage
-# of torch.compile, this script warms up in <10 seconds and takes 3.83 seconds per run.
+# Note that the first time this script is run, compilation takes up to two minutes. For a script with
+# (much) less warmup time see airbench94.py.
 #
-# The 8-layer convnet we train has 2M parameters and uses 0.24 GFLOPs per forward pass. The entire
-# training run uses 350 TFLOPs, which could theoretically take 1.12 A100-seconds at perfect utilization.
+# This script trains an 8-layer convnet with 2M parameters and 0.28 GFLOPs per forward pass. The entire
+# training run uses 358 TFLOPs, which could theoretically take 1.15 A100-seconds at perfect utilization.
 #
 # For comparison, version 0.7.0 of https://github.com/tysam-code/hlb-CIFAR10 uses 587 TFLOPs and runs in
 # 6.2 seconds. The final training script from David Page's series "How to Train Your ResNet" (Page 2018)
