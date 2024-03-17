@@ -1,13 +1,18 @@
 # A variant of airbench optimized for time-to-95%.
 # 10.4s runtime on an A100; 1.39 PFLOPs.
 # Evidence: 95.01 average accuracy in n=200 runs.
-# If random flip is used instead of alternating, then decays to 94.95 average accuracy in n=100 runs.
-# With random flip and 16 epochs instead of 15, we get 94.97 in n=100 runs.
-# With random flip and 17, we get 95.01 in n=100 runs.
+#
+# We recorded the runtime of 10.4 seconds on an NVIDIA A100-SXM4-80GB with the following nvidia-smi:
+# NVIDIA-SMI 515.105.01   Driver Version: 515.105.01   CUDA Version: 11.7
+# torch.__version__ == '2.1.2+cu118'
 #
 # Changes relative to airbench:
 # - Increased width and reduced learning rate.
 # - Increased training duration to 15 epochs.
+#
+# If random flip is used instead of alternating, then decays to 94.95 average accuracy in n=100 runs.
+# With random flip and 16 epochs instead of 15, we get 94.97 in n=100 runs.
+# With random flip and 17, we get 95.01 in n=100 runs.
 
 #############################################
 #            Setup/Hyperparameters          #
