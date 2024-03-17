@@ -1,8 +1,12 @@
-import math
-import numpy as np
+import os
+from math import ceil
+
 import torch
 from torch import nn
 import torch.nn.functional as F
+import torchvision
+import torchvision.transforms as T
+
 
 @torch.no_grad
 def infer(model, loader, tta_level=0):
@@ -40,11 +44,6 @@ def evaluate(model, loader, tta_level=1):
 #############################################
 #                DataLoader                 #
 #############################################
-
-# https://github.com/KellerJordan/cifar10-loader/blob/master/quick_cifar/loader.py
-import os
-import torchvision
-import torchvision.transforms as T
 
 CIFAR_MEAN = torch.tensor((0.4914, 0.4822, 0.4465))
 CIFAR_STD = torch.tensor((0.2470, 0.2435, 0.2616))
@@ -126,7 +125,7 @@ class CifarLoader:
         self.detflip = detflip
 
     def __len__(self):
-        return len(self.images)//self.batch_size if self.drop_last else math.ceil(len(self.images)/self.batch_size)
+        return len(self.images)//self.batch_size if self.drop_last else ceil(len(self.images)/self.batch_size)
     
     def __setattr__(self, k, v):
         if k in ('images', 'labels'):
@@ -260,10 +259,18 @@ def train(train_loader, epochs, label_smoothing, learning_rate, bias_scaler, mom
 
     test_loader = CifarLoader('cifar10', train=False, batch_size=2000)
 
-    total_train_steps = math.ceil(len(train_loader) * epochs)
-    lr_schedule = np.interp(np.arange(1+total_train_steps),
-                            [0, int(0.23 * total_train_steps), total_train_steps],
-                            [0.2, 1, 0.07]) # triangular learning rate schedule
+    def triangle(steps, start=0, end=0, peak=0.5):
+        xp = torch.tensor([0, int(peak * steps), steps])
+        fp = torch.tensor([start, 1, end])
+        x = torch.arange(1+steps)
+        m = (fp[1:] - fp[:-1]) / (xp[1:] - xp[:-1])
+        b = fp[:-1] - (m * xp[:-1])
+        indices = torch.sum(torch.ge(x[:, None], xp[None, :]), 1) - 1
+        indices = torch.clamp(indices, 0, len(m) - 1)
+        return m[indices] * x + b[indices]
+
+    total_train_steps = ceil(len(train_loader) * epochs)
+    lr_schedule = triangle(total_train_steps, start=0.2, end=0.07, peak=0.23)
 
     model = make_net()
     lookahead_state = None
@@ -290,7 +297,7 @@ def train(train_loader, epochs, label_smoothing, learning_rate, bias_scaler, mom
     torch.cuda.synchronize()
     total_time_seconds += 1e-3 * starter.elapsed_time(ender)
 
-    for epoch in range(math.ceil(epochs)):
+    for epoch in range(ceil(epochs)):
 
         model[0].bias.requires_grad = (epoch < whiten_bias_epochs)
 
