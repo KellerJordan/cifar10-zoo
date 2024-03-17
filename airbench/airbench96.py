@@ -380,10 +380,18 @@ def main(run):
         # The only purpose of the first run is to warmup, so we can use dummy data
         train_loader.labels = torch.randint(0, 10, size=(len(train_loader.labels),), device=train_loader.labels.device)
 
+    def triangle(steps, start=0, end=0, peak=0.5):
+        xp = torch.tensor([0, int(peak * steps), steps])
+        fp = torch.tensor([start, 1, end])
+        x = torch.arange(1+steps)
+        m = (fp[1:] - fp[:-1]) / (xp[1:] - xp[:-1])
+        b = fp[:-1] - (m * xp[:-1])
+        indices = torch.sum(torch.ge(x[:, None], xp[None, :]), 1) - 1
+        indices = torch.clamp(indices, 0, len(m) - 1)
+        return m[indices] * x + b[indices]
+
     total_train_steps = ceil(len(train_loader) * epochs)
-    lr_schedule = np.interp(np.arange(1+total_train_steps),
-                            [0, int(0.23 * total_train_steps), total_train_steps],
-                            [0.2, 1, 0.07]) # triangular learning rate schedule
+    lr_schedule = triangle(total_train_steps, start=0.2, end=0.07, peak=0.23)
 
     model = make_net()
     lookahead_state = None
