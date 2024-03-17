@@ -1,4 +1,4 @@
-# airbench_cifar10.py
+# airbench94_compiled.py
 #
 # This script is designed to reach 94% accuracy on the CIFAR-10 test-set in the shortest possible time
 # after first seeing the training set. It runs in 3.29 seconds on a single NVIDIA A100.
