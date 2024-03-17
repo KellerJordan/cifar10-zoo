@@ -1,6 +1,6 @@
 # 94.02 in n=700
 
-from .utils import train, evaluate, Loader
+from .utils import train, evaluate, CifarLoader
 
 #############################################
 #            Setup/Hyperparameters          #
@@ -109,7 +109,7 @@ class ConvGroup(nn.Module):
 #            Network Definition             #
 #############################################
 
-def make_net():
+def make_net94():
     widths = {
         'block1': (1 * hyp['net']['base_width']), # 64  w/ width at base value
         'block2': (4 * hyp['net']['base_width']), # 256 w/ width at base value
@@ -139,12 +139,12 @@ def make_net():
 #             Train and Eval               #
 ############################################
 
-def airbench94(train_loader=Loader('cifar10', train=True, batch_size=hyp['opt']['batch_size'], aug=hyp['aug']),
+def train94(train_loader=CifarLoader('cifar10', train=True, batch_size=hyp['opt']['batch_size'], aug=hyp['aug']),
             epochs=hyp['opt']['train_epochs'], label_smoothing=hyp['opt']['label_smoothing'],
             learning_rate=hyp['opt']['lr'], bias_scaler=hyp['opt']['bias_scaler'],
             momentum=hyp['opt']['momentum'], weight_decay=hyp['opt']['weight_decay'],
             whiten_bias_epochs=hyp['opt']['whiten_bias_epochs'], tta_level=hyp['net']['tta_level'],
-            make_net=make_net, run=0, verbose=True):
+            make_net=make_net94, run=0, verbose=True):
 
     return train(train_loader, epochs, label_smoothing, learning_rate, bias_scaler, momentum, weight_decay,
                  whiten_bias_epochs, tta_level, make_net, run, verbose)
