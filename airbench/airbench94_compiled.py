@@ -124,8 +124,6 @@ hyp = {
 #                DataLoader                 #
 #############################################
 
-# https://github.com/KellerJordan/cifar10-loader/blob/master/quick_cifar/loader.py
-
 CIFAR_MEAN = torch.tensor((0.4914, 0.4822, 0.4465))
 CIFAR_STD = torch.tensor((0.2470, 0.2435, 0.2616))
 
