@@ -1,4 +1,4 @@
-# 94.00 in n=100
+# 94.00 in n=50
 #############################################
 #            Setup/Hyperparameters          #
 #############################################
@@ -29,7 +29,7 @@ torch.backends.cudnn.benchmark = True
 
 hyp = {
     'opt': {
-        'train_epochs': 34.0,
+        'train_epochs': 45.0,
         'batch_size': 1024,
         'lr': 10.0,                 # learning rate per 1024 examples
         'momentum': 0.85,
@@ -205,8 +205,7 @@ def make_net():
     }
     whiten_conv_width = 2 * 3 * hyp['net']['whitening']['kernel_size']**2
     net = nn.Sequential(
-        Conv(3, whiten_conv_width, kernel_size=hyp['net']['whitening']['kernel_size'], padding=0),
-        BatchNorm(whiten_conv_width),
+        Conv(3, whiten_conv_width, kernel_size=hyp['net']['whitening']['kernel_size'], padding=0, bias=True),
         nn.GELU(),
         ConvGroup(whiten_conv_width, widths['block1']),
         ConvGroup(widths['block1'],  widths['block2']),
