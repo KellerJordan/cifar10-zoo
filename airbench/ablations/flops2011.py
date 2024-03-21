@@ -11,7 +11,7 @@ class Flatten(nn.Module):
     def forward(self, x):
         return x.view(len(x), -1)
 
-k = 400
+k = 300
 net = nn.Sequential(
     nn.Conv2d(3, k, kernel_size=3, padding=0),
     nn.MaxPool2d(3),
@@ -37,5 +37,10 @@ def print_flops(epochs):
     pflops = run_flops / 1e15
     print('PFLOPs: %.3f' % pflops)
     
-print_flops(10)
+print_flops(500)
+# This script computes the FLOPs used by the state-of-the-art method for CIFAR-10 in 2011
+# https://arxiv.org/abs/1102.0183
+# Section 4.1: "We use a variable learning rate that shrinks by a multiplicative constant after each epoch, from 10−3 down to 3 · 10−5 after 500 epochs."
+# Section 4.3: "Like for MNIST, the learning rate is initialized by 0.001 and multiplied by 0.993 after every epoch."
+# Conclusion: The CIFAR-10 model was also trained for 500 epochs.
 
