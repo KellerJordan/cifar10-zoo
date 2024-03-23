@@ -1,3 +1,6 @@
+# This script is a minimal replication of the main experiment from https://arxiv.org/abs/2211.08403.
+# It runs in 30 seconds on an A100.
+
 import copy
 from tqdm import tqdm
 import matplotlib.pyplot as plt
