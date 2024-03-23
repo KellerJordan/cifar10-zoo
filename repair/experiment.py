@@ -131,18 +131,17 @@ if __name__ == '__main__':
 
     n = len(net1)
     # Iterate through the network layers, looking for convolutions to align.
-    for conv_idx in tqdm(range(0, n)): 
+    for conv_idx in tqdm(range(n)):
         
         if isinstance(net1[conv_idx], nn.Conv2d):
             
             # Find the first activation after the conv layer.
             act_idx = -1
             for j in range(conv_idx+1, n):
-                assert not isinstance(net1[j], nn.Conv2d)
                 if isinstance(net1[j], ACTIVATION_TYPE):
                     act_idx = j
                     break
-            assert not act_idx == -1
+            assert not act_idx == -1, 'Failed to find the activation of convolution at index %d' % conv_idx
 
             # Find the BatchNorm layer, if it exists.
             bn_idx = -1
@@ -158,8 +157,8 @@ if __name__ == '__main__':
                 if isinstance(net1[j], nn.Conv2d) or isinstance(net1[j], nn.Linear):
                     next_layer_idx = j
                     break
-            assert not next_layer_idx == -1
-            assert next_layer_idx > act_idx
+            assert not next_layer_idx == -1, 'Failed to find the next layer after convolution at index %d' % conv_idx
+            assert next_layer_idx > act_idx, 'Found the next layer before the activation for the current layer. The code would need to be modified to support this.'
             
             # Compute a permutation aligning the neurons of the two layers (https://arxiv.org/abs/1511.07543).
             corr_mtx = get_corr_matrix(net0[:act_idx+1], net1[:act_idx+1], train_loader)
