@@ -173,11 +173,13 @@ if __name__ == '__main__':
 
 
     print('\n\nStep 3: Interpolate between the two networks.\n')
+
     accs1 = []
     accs2 = []
     accs3 = []
     accs4 = []
-    alpha_range = torch.arange(0, 1.0001, 0.05).tolist()
+    alpha_range = torch.arange(0, 1.0001, 0.02).tolist()
+    print('Trying %d different interpolation values...' % len(alpha_range))
     for alpha in tqdm(alpha_range):
         
         net = mix_weights(net0, net1, alpha)
@@ -198,7 +200,7 @@ if __name__ == '__main__':
 
 
     i = alpha_range.index(0.5)
-    print('Accuracy values for midpoint network (i.e., alpha = 0.5):\n')
+    print('\nAccuracy values for midpoint network (i.e., alpha = 0.5):\n')
     print('Naive interpolation:\t\t\t%.4f' % accs1[i])
     print('Naive interpolation + reset BN:\t\t%.4f' % accs2[i])
     print('Aligned interpolation:\t\t\t%.4f' % accs3[i])
@@ -213,4 +215,5 @@ if __name__ == '__main__':
     plt.plot(alpha_range, accs4, label='Aligned interpolation + reset bn')
     plt.legend()
     plt.savefig('figure.png', dpi=100, bbox_inches='tight')
+    print('Saved figure.')
 
