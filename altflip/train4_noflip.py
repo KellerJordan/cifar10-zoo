@@ -200,7 +200,7 @@ class ImageNetTrainer:
 
         res = self.get_resolution(epoch=0)
         self.decoder = RandomResizedCropRGBImageDecoder((res, res))
-        #self.decoder = RandomResizedCropRGBImageDecoder((res, res), scale=(0.5, 1.0), ratio=(1.0, 1.0))
+        #self.decoder = RandomResizedCropRGBImageDecoder((res, res), scale=(1.0, 1.0), ratio=(1.0, 1.0))
         image_pipeline = [
             self.decoder,
             #RandomHorizontalFlip(),
