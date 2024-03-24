@@ -19,7 +19,6 @@ import os
 import time
 import json
 from uuid import uuid4
-from typing import List
 from pathlib import Path
 from argparse import ArgumentParser
 
@@ -28,7 +27,6 @@ from fastargs.decorators import param
 from fastargs import Param, Section
 from fastargs.validation import And, OneOf
 
-from ffcv.pipeline.operation import Operation
 from ffcv.loader import Loader, OrderOption
 from ffcv.transforms import ToTensor, ToDevice, Squeeze, \
     RandomHorizontalFlip, ToTorchImage, Convert
@@ -203,7 +201,7 @@ class ImageNetTrainer:
         res = self.get_resolution(epoch=0)
         self.decoder = RandomResizedCropRGBImageDecoder((res, res))
         #self.decoder = RandomResizedCropRGBImageDecoder((res, res), scale=(0.5, 1.0), ratio=(1.0, 1.0))
-        image_pipeline: List[Operation] = [
+        image_pipeline = [
             self.decoder,
             #RandomHorizontalFlip(),
             ToTensor(),
@@ -213,7 +211,7 @@ class ImageNetTrainer:
             torchvision.transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
         ]
 
-        label_pipeline: List[Operation] = [
+        label_pipeline = [
             IntDecoder(),
             ToTensor(),
             ToDevice(ch.device(0), non_blocking=True),
