@@ -1,14 +1,12 @@
-# Uncompiled variant of airbench94_compiled.py
-# 3.83s runtime on an A100; 0.36 PFLOPs.
-# Evidence: 94.01 average accuracy in n=1000 runs.
+# airbench94_simple.py
 #
-# We recorded the runtime of 3.83 seconds on an NVIDIA A100-SXM4-80GB with the following nvidia-smi:
-# NVIDIA-SMI 515.105.01   Driver Version: 515.105.01   CUDA Version: 11.7
-# torch.__version__ == '2.1.2+cu118'
+# Simplified variant of airbench without compilation or lookahead optimization.
 
 #############################################
 #            Setup/Hyperparameters          #
 #############################################
+
+import airbench
 
 import os
 import sys
@@ -37,9 +35,9 @@ torch.backends.cudnn.benchmark = True
 
 hyp = {
     'opt': {
-        'train_epochs': 9.7,
+        'train_epochs': 10.4,
         'batch_size': 1024,
-        'lr': 11.5,                 # learning rate per 1024 examples
+        'lr': 10.0,                 # learning rate per 1024 examples
         'momentum': 0.85,
         'weight_decay': 0.0153,     # weight decay per 1024 examples (decoupled from learning rate)
         'bias_scaler': 64.0,        # scales up learning rate (but not weight decay) for BatchNorm biases
@@ -56,7 +54,7 @@ hyp = {
             'block2': 256,
             'block3': 256,
         },
-        'batchnorm_momentum': 0.6,
+        'batchnorm_momentum': 0.9,
         'scaling_factor': 1/9,
         'tta_level': 2,         # the level of test-time augmentation: 0=none, 1=mirror, 2=mirror+translate
     },
@@ -255,20 +253,6 @@ def init_whitening_conv(layer, train_set, eps=5e-4):
     layer.weight.data[:] = torch.cat((eigenvectors_scaled, -eigenvectors_scaled))
 
 ############################################
-#                Lookahead                 #
-############################################
-
-class LookaheadState:
-    def __init__(self, net):
-        self.net_ema = {k: v.clone() for k, v in net.state_dict().items()}
-
-    def update(self, net, decay):
-        for ema_param, net_param in zip(self.net_ema.values(), net.state_dict().values()):
-            if net_param.dtype in (torch.half, torch.float):
-                ema_param.lerp_(net_param, 1-decay)
-                net_param.copy_(ema_param)
-
-############################################
 #                 Logging                  #
 ############################################
 
@@ -299,49 +283,6 @@ def print_training_details(variables, is_final_entry):
     print_columns(formatted, is_final_entry=is_final_entry)
 
 ############################################
-#               Evaluation                 #
-############################################
-
-def infer(model, loader, tta_level=0):
-
-    # Test-time augmentation strategy (for tta_level=2):
-    # 1. Flip/mirror the image left-to-right (50% of the time).
-    # 2. Translate the image by one pixel either up-and-left or down-and-right (50% of the time,
-    #    i.e. both happen 25% of the time).
-    #
-    # This creates 6 views per image (left/right times the two translations and no-translation),
-    # which we evaluate and then weight according to the given probabilities.
-
-    def infer_basic(inputs, net):
-        return net(inputs).clone()
-
-    def infer_mirror(inputs, net):
-        return 0.5 * net(inputs) + 0.5 * net(inputs.flip(-1))
-
-    def infer_mirror_translate(inputs, net):
-        logits = infer_mirror(inputs, net)
-        pad = 1
-        padded_inputs = F.pad(inputs, (pad,)*4, 'reflect')
-        inputs_translate_list = [
-            padded_inputs[:, :, 0:32, 0:32],
-            padded_inputs[:, :, 2:34, 2:34],
-        ]
-        logits_translate_list = [infer_mirror(inputs_translate, net)
-                                 for inputs_translate in inputs_translate_list]
-        logits_translate = torch.stack(logits_translate_list).mean(0)
-        return 0.5 * logits + 0.5 * logits_translate
-
-    model.eval()
-    test_images = loader.normalize(loader.images)
-    infer_fn = [infer_basic, infer_mirror, infer_mirror_translate][tta_level]
-    with torch.no_grad():
-        return torch.cat([infer_fn(inputs, model) for inputs in test_images.split(2000)])
-
-def evaluate(model, loader, tta_level=0):
-    logits = infer(model, loader, tta_level)
-    return (logits.argmax(1) == loader.labels).float().mean().item()
-
-############################################
 #                Training                  #
 ############################################
 
@@ -362,9 +303,6 @@ def main(run):
     loss_fn = nn.CrossEntropyLoss(label_smoothing=hyp['opt']['label_smoothing'], reduction='none')
     test_loader = CifarLoader('cifar10', train=False, batch_size=2000)
     train_loader = CifarLoader('cifar10', train=True, batch_size=batch_size, aug=hyp['aug'])
-    if run == 'warmup':
-        # The only purpose of the first run is to warmup, so we can use dummy data
-        train_loader.labels = torch.randint(0, 10, size=(len(train_loader.labels),), device=train_loader.labels.device)
     total_train_steps = ceil(len(train_loader) * epochs)
 
     model = make_net()
@@ -387,11 +325,8 @@ def main(run):
         indices = torch.sum(torch.ge(x[:, None], xp[None, :]), 1) - 1
         indices = torch.clamp(indices, 0, len(m) - 1)
         return m[indices] * x + b[indices]
-    lr_schedule = triangle(total_train_steps, start=0.2, end=0.07, peak=0.23)
+    lr_schedule = triangle(total_train_steps, start=0.2, end=0, peak=0.2)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda i: lr_schedule[i])
-
-    alpha_schedule = 0.95**5 * (torch.arange(total_train_steps+1) / total_train_steps)**3
-    lookahead_state = LookaheadState(model)
 
     # For accurately timing GPU code
     starter = torch.cuda.Event(enable_timing=True)
@@ -433,13 +368,7 @@ def main(run):
             scheduler.step()
 
             current_steps += 1
-
-            if current_steps % 5 == 0:
-                lookahead_state.update(model, decay=alpha_schedule[current_steps].item())
-
             if current_steps >= total_train_steps:
-                if lookahead_state is not None:
-                    lookahead_state.update(model, decay=1.0)
                 break
 
         ender.record()
@@ -453,7 +382,7 @@ def main(run):
         # Save the accuracy and loss from the last training batch of the epoch
         train_acc = (outputs.detach().argmax(1) == labels).float().mean().item()
         train_loss = loss.item() / batch_size
-        val_acc = evaluate(model, test_loader, tta_level=0)
+        val_acc = airbench.evaluate(model, test_loader, tta_level=0)
         print_training_details(locals(), is_final_entry=False)
         run = None # Only print the run number once
 
@@ -462,7 +391,7 @@ def main(run):
     ####################
 
     starter.record()
-    tta_val_acc = evaluate(model, test_loader, tta_level=hyp['net']['tta_level'])
+    tta_val_acc = airbench.evaluate(model, test_loader, tta_level=hyp['net']['tta_level'])
     ender.record()
     torch.cuda.synchronize()
     total_time_seconds += 1e-3 * starter.elapsed_time(ender)
@@ -477,8 +406,7 @@ if __name__ == "__main__":
         code = f.read()
 
     print_columns(logging_columns_list, is_head=True)
-    #main('warmup')
-    accs = torch.tensor([main(run) for run in range(25)])
+    accs = torch.tensor([main(run) for run in range(100)])
     print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
     log = {'code': code, 'accs': accs}
