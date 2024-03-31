@@ -421,7 +421,7 @@ def main(run):
             for k, p in model.named_parameters():
                 if 'conv' in k:
                     norm_ratio = p.grad.reshape(len(p), -1).norm(dim=1) / p.data.reshape(len(p), -1).norm(dim=1)
-                    p.grad = p.grad / norm_ratio.view(-1, 1, 1, 1)
+                    p.grad = p.grad / (norm_ratio.view(-1, 1, 1, 1) + 1e-5)
 
             optimizer.step()
             scheduler.step()
