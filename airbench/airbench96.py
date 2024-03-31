@@ -53,12 +53,6 @@ hyp = {
         'weight_decay': 0.0153,     # weight decay per 1024 examples (decoupled from learning rate)
         'bias_scaler': 64.0,        # scales up learning rate (but not weight decay) for BatchNorm biases
         'label_smoothing': 0.2,
-        'ema': {
-            'start_epochs': 3,
-            'decay_base': 0.95,
-            'decay_pow': 3.,
-            'every_n_steps': 5,
-        },
         'whiten_bias_epochs': 3,    # how many epochs to train the whitening layer bias before freezing
     },
     'aug': {
@@ -67,11 +61,12 @@ hyp = {
         'cutout': 12,
     },
     'net': {
-        'whitening': {
-            'kernel_size': 2,
+        'widths': {
+            'block1': 128,
+            'block2': 512,
+            'block3': 512,
         },
         'batchnorm_momentum': 0.6,
-        'base_width': 64,
         'scaling_factor': 1/9,
         'tta_level': 2,         # the level of test-time augmentation: 0=none, 1=mirror, 2=mirror+translate
     },
@@ -119,7 +114,7 @@ def make_random_square_masks(inputs, size):
     # measure distance, using the center as a reference point
     corner_y_dists = torch.arange(h, device=inputs.device).view(1, 1, h, 1) - corner_y.view(-1, 1, 1, 1)
     corner_x_dists = torch.arange(w, device=inputs.device).view(1, 1, 1, w) - corner_x.view(-1, 1, 1, 1)
-    
+
     mask_y = (corner_y_dists >= 0) * (corner_y_dists < size)
     mask_x = (corner_x_dists >= 0) * (corner_x_dists < size)
 
@@ -209,7 +204,7 @@ class Mul(nn.Module):
         return x * self.scale
 
 class BatchNorm(nn.BatchNorm2d):
-    def __init__(self, num_features, eps=1e-12, momentum=hyp['net']['batchnorm_momentum'],
+    def __init__(self, num_features, momentum, eps=1e-12,
                  weight=False, bias=True):
         super().__init__(num_features, eps=eps, momentum=1-momentum)
         self.weight.requires_grad = weight
@@ -224,20 +219,19 @@ class Conv(nn.Conv2d):
         super().reset_parameters()
         if self.bias is not None:
             self.bias.data.zero_()
-        # Create an implicit residual via identity initialization
         w = self.weight.data
         torch.nn.init.dirac_(w[:w.size(1)])
 
 class ConvGroup(nn.Module):
-    def __init__(self, channels_in, channels_out):
+    def __init__(self, channels_in, channels_out, batchnorm_momentum):
         super().__init__()
         self.conv1 = Conv(channels_in,  channels_out)
         self.pool = nn.MaxPool2d(2)
-        self.norm1 = BatchNorm(channels_out)
+        self.norm1 = BatchNorm(channels_out, batchnorm_momentum)
         self.conv2 = Conv(channels_out, channels_out)
-        self.norm2 = BatchNorm(channels_out)
+        self.norm2 = BatchNorm(channels_out, batchnorm_momentum)
         self.conv3 = Conv(channels_out, channels_out)
-        self.norm3 = BatchNorm(channels_out)
+        self.norm3 = BatchNorm(channels_out, batchnorm_momentum)
         self.activ = nn.GELU()
 
     def forward(self, x):
@@ -252,26 +246,22 @@ class ConvGroup(nn.Module):
         x = self.conv3(x)
         x = self.norm3(x)
         x = self.activ(x)
-        x += x0
+        x = x + x0
         return x
 
 #############################################
 #            Network Definition             #
 #############################################
 
-def make_net():
-    widths = {
-        'block1': (2 * hyp['net']['base_width']), # 128 w/ width at base value
-        'block2': (8 * hyp['net']['base_width']), # 512 w/ width at base value
-        'block3': (8 * hyp['net']['base_width']), # 512 w/ width at base value
-    }
-    whiten_conv_width = 2 * 3 * hyp['net']['whitening']['kernel_size']**2
+def make_net(widths=hyp['net']['widths'], batchnorm_momentum=hyp['net']['batchnorm_momentum']):
+    whiten_kernel_size = 2
+    whiten_width = 2 * 3 * whiten_kernel_size**2
     net = nn.Sequential(
-        Conv(3, whiten_conv_width, kernel_size=hyp['net']['whitening']['kernel_size'], padding=0, bias=True),
+        Conv(3, whiten_width, whiten_kernel_size, padding=0, bias=True),
         nn.GELU(),
-        ConvGroup(whiten_conv_width, widths['block1']),
-        ConvGroup(widths['block1'],  widths['block2']),
-        ConvGroup(widths['block2'],  widths['block3']),
+        ConvGroup(whiten_width,     widths['block1'], batchnorm_momentum),
+        ConvGroup(widths['block1'], widths['block2'], batchnorm_momentum),
+        ConvGroup(widths['block2'], widths['block3'], batchnorm_momentum),
         nn.MaxPool2d(3),
         Flatten(),
         nn.Linear(widths['block3'], 10, bias=False),
@@ -318,7 +308,6 @@ class LookaheadState:
         for ema_param, net_param in zip(self.net_ema.values(), net.state_dict().values()):
             if net_param.dtype in (torch.half, torch.float):
                 ema_param.lerp_(net_param, 1-decay)
-                # Copy the ema parameters back to the network, similarly to the Lookahead optimizer
                 net_param.copy_(ema_param)
 
 ############################################
@@ -336,7 +325,7 @@ def print_columns(columns_list, is_head=False, is_final_entry=False):
     if is_head or is_final_entry:
         print('-'*len(print_string))
 
-logging_columns_list = ['run   ', 'epoch', 'train_loss', 'val_loss', 'train_acc', 'val_acc', 'tta_val_acc', 'total_time_seconds']
+logging_columns_list = ['run   ', 'epoch', 'train_loss', 'train_acc', 'val_acc', 'tta_val_acc', 'total_time_seconds']
 def print_training_details(variables, is_final_entry):
     formatted = []
     for col in logging_columns_list:
@@ -352,7 +341,50 @@ def print_training_details(variables, is_final_entry):
     print_columns(formatted, is_final_entry=is_final_entry)
 
 ############################################
-#             Train and Eval               #
+#               Evaluation                 #
+############################################
+
+def infer(model, loader, tta_level=0):
+
+    # Test-time augmentation strategy (for tta_level=2):
+    # 1. Flip/mirror the image left-to-right (50% of the time).
+    # 2. Translate the image by one pixel either up-and-left or down-and-right (50% of the time,
+    #    i.e. both happen 25% of the time).
+    #
+    # This creates 6 views per image (left/right times the two translations and no-translation),
+    # which we evaluate and then weight according to the given probabilities.
+
+    def infer_basic(inputs, net):
+        return net(inputs).clone()
+
+    def infer_mirror(inputs, net):
+        return 0.5 * net(inputs) + 0.5 * net(inputs.flip(-1))
+
+    def infer_mirror_translate(inputs, net):
+        logits = infer_mirror(inputs, net)
+        pad = 1
+        padded_inputs = F.pad(inputs, (pad,)*4, 'reflect')
+        inputs_translate_list = [
+            padded_inputs[:, :, 0:32, 0:32],
+            padded_inputs[:, :, 2:34, 2:34],
+        ]
+        logits_translate_list = [infer_mirror(inputs_translate, net)
+                                 for inputs_translate in inputs_translate_list]
+        logits_translate = torch.stack(logits_translate_list).mean(0)
+        return 0.5 * logits + 0.5 * logits_translate
+
+    model.eval()
+    test_images = loader.normalize(loader.images)
+    infer_fn = [infer_basic, infer_mirror, infer_mirror_translate][tta_level]
+    with torch.no_grad():
+        return torch.cat([infer_fn(inputs, model) for inputs in test_images.split(2000)])
+
+def evaluate(model, loader, tta_level=0):
+    logits = infer(model, loader, tta_level)
+    return (logits.argmax(1) == loader.labels).float().mean().item()
+
+############################################
+#                Training                  #
 ############################################
 
 def main(run):
@@ -360,7 +392,7 @@ def main(run):
     batch_size = hyp['opt']['batch_size']
     epochs = hyp['opt']['train_epochs']
     momentum = hyp['opt']['momentum']
-    # Assuming  gradients are constant in time, for Nesterov momentum, the below ratio is how much
+    # Assuming gradients are constant in time, for Nesterov momentum, the below ratio is how much
     # larger the default steps will be than the underlying per-example gradients. We divide the
     # learning rate by this ratio in order to ensure steps are the same scale as gradients, regardless
     # of the choice of momentum.
@@ -370,13 +402,21 @@ def main(run):
     lr_biases = lr * hyp['opt']['bias_scaler']
 
     loss_fn = nn.CrossEntropyLoss(label_smoothing=hyp['opt']['label_smoothing'], reduction='none')
-
-    train_augs = dict(flip=hyp['aug']['flip'], translate=hyp['aug']['translate'], cutout=hyp['aug']['cutout'])
-    train_loader = CifarLoader('cifar10', train=True, batch_size=batch_size, aug=train_augs)
     test_loader = CifarLoader('cifar10', train=False, batch_size=2000)
+    train_loader = CifarLoader('cifar10', train=True, batch_size=batch_size, aug=hyp['aug'])
     if run == 'warmup':
         # The only purpose of the first run is to warmup, so we can use dummy data
         train_loader.labels = torch.randint(0, 10, size=(len(train_loader.labels),), device=train_loader.labels.device)
+    total_train_steps = ceil(len(train_loader) * epochs)
+
+    model = make_net()
+    current_steps = 0
+
+    norm_biases = [p for k, p in model.named_parameters() if 'norm' in k and p.requires_grad]
+    other_params = [p for k, p in model.named_parameters() if 'norm' not in k and p.requires_grad]
+    param_configs = [dict(params=norm_biases, lr=lr_biases, weight_decay=wd/lr_biases),
+                     dict(params=other_params, lr=lr, weight_decay=wd/lr)]
+    optimizer = torch.optim.SGD(param_configs, momentum=momentum, nesterov=True)
 
     def triangle(steps, start=0, end=0, peak=0.5):
         xp = torch.tensor([0, int(peak * steps), steps])
@@ -387,25 +427,15 @@ def main(run):
         indices = torch.sum(torch.ge(x[:, None], xp[None, :]), 1) - 1
         indices = torch.clamp(indices, 0, len(m) - 1)
         return m[indices] * x + b[indices]
-
-    total_train_steps = ceil(len(train_loader) * epochs)
     lr_schedule = triangle(total_train_steps, start=0.2, end=0.07, peak=0.23)
-
-    model = make_net()
-    lookahead_state = None
-    current_steps = 0
-
-    norm_biases = [p for k, p in model.named_parameters() if 'norm' in k and p.requires_grad]
-    other_params = [p for k, p in model.named_parameters() if 'norm' not in k and p.requires_grad]
-    param_configs = [dict(params=norm_biases, lr=lr_biases, weight_decay=wd/lr_biases),
-                     dict(params=other_params, lr=lr, weight_decay=wd/lr)]
-    optimizer = torch.optim.SGD(param_configs, momentum=momentum, nesterov=True)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda i: lr_schedule[i])
+
+    alpha_schedule = 0.95**5 * (torch.arange(total_train_steps+1) / total_train_steps)**3
+    lookahead_state = LookaheadState(model)
 
     # For accurately timing GPU code
     starter = torch.cuda.Event(enable_timing=True)
     ender = torch.cuda.Event(enable_timing=True)
-
     total_time_seconds = 0.0
 
     # Initialize the whitening layer using training images
@@ -438,21 +468,13 @@ def main(run):
 
             current_steps += 1
 
-            if epoch >= hyp['opt']['ema']['start_epochs'] and current_steps % hyp['opt']['ema']['every_n_steps'] == 0:
-                if lookahead_state is None:
-                    lookahead_state = LookaheadState(model)
-                else:
-                    # We warm up our ema's decay/momentum value over training (this lets us move fast, then average strongly at the end).
-                    base_rho = hyp['opt']['ema']['decay_base'] ** hyp['opt']['ema']['every_n_steps']
-                    rho = base_rho * (current_steps / total_train_steps) ** hyp['opt']['ema']['decay_pow']
-                    lookahead_state.update(model, decay=rho)
+            if current_steps % 5 == 0:
+                lookahead_state.update(model, decay=alpha_schedule[current_steps].item())
 
             if current_steps >= total_train_steps:
+                if lookahead_state is not None:
+                    lookahead_state.update(model, decay=1.0)
                 break
-
-        if lookahead_state is not None:
-            # Copy back parameters a final time after each epoch
-            lookahead_state.update(model, decay=1.0)
 
         ender.record()
         torch.cuda.synchronize()
@@ -465,18 +487,7 @@ def main(run):
         # Save the accuracy and loss from the last training batch of the epoch
         train_acc = (outputs.detach().argmax(1) == labels).float().mean().item()
         train_loss = loss.item() / batch_size
-
-        model.eval()
-        with torch.no_grad():
-            loss_list, acc_list = [], []
-            for inputs, labels in test_loader:
-                outputs = model(inputs)
-                loss_list.append(loss_fn(outputs, labels).float().mean())
-                acc_list.append((outputs.argmax(1) == labels).float().mean())
-            val_acc = torch.stack(acc_list).mean().item()
-            val_loss = torch.stack(loss_list).mean().item()
-        tta_val_acc = None
-
+        val_acc = evaluate(model, test_loader, tta_level=0)
         print_training_details(locals(), is_final_entry=False)
         run = None # Only print the run number once
 
@@ -485,49 +496,7 @@ def main(run):
     ####################
 
     starter.record()
-
-    with torch.no_grad():
-
-        # Test-time augmentation strategy (for tta_level=2):
-        # 1. Flip/mirror the image left-to-right (50% of the time).
-        # 2. Translate the image by one pixel either up-and-left or down-and-right (50% of the time,
-        #    i.e. both happen 25% of the time).
-        #
-        # This creates 6 views per image (left/right times the two translations and no-translation),
-        # which we evaluate and then weight according to the given probabilities.
-
-        test_images = test_loader.normalize(test_loader.images)
-        test_labels = test_loader.labels
-
-        def infer_basic(inputs, net):
-            return net(inputs).clone() # using .clone() here averts some kind of bug with torch.compile
-
-        def infer_mirror(inputs, net):
-            return 0.5 * net(inputs) + 0.5 * net(inputs.flip(-1))
-
-        def infer_mirror_translate(inputs, net):
-            logits = infer_mirror(inputs, net)
-            pad = 1
-            padded_inputs = F.pad(inputs, (pad,)*4, 'reflect')
-            inputs_translate_list = [
-                padded_inputs[:, :, 0:32, 0:32],
-                padded_inputs[:, :, 2:34, 2:34],
-            ]
-            logits_translate_list = [infer_mirror(inputs_translate, net) for inputs_translate in inputs_translate_list]
-            logits_translate = torch.stack(logits_translate_list).mean(0)
-            return 0.5 * logits + 0.5 * logits_translate
-
-        if hyp['net']['tta_level'] == 0:
-            infer_fn = infer_basic
-        elif hyp['net']['tta_level'] == 1:
-            infer_fn = infer_mirror
-        elif hyp['net']['tta_level'] == 2:
-            infer_fn = infer_mirror_translate
-
-        model.eval()
-        logits_tta = torch.cat([infer_fn(inputs, model) for inputs in test_images.split(2000)])
-        tta_val_acc = (logits_tta.argmax(1) == test_labels).float().mean().item()
-
+    tta_val_acc = evaluate(model, test_loader, tta_level=hyp['net']['tta_level'])
     ender.record()
     torch.cuda.synchronize()
     total_time_seconds += 1e-3 * starter.elapsed_time(ender)

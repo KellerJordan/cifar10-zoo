@@ -1,18 +1,6 @@
-# A variant of airbench optimized for time-to-95%.
-# 10.4s runtime on an A100; 1.39 PFLOPs.
-# Evidence: 95.01 average accuracy in n=200 runs.
+# airbench94_simple.py
 #
-# We recorded the runtime of 10.4 seconds on an NVIDIA A100-SXM4-80GB with the following nvidia-smi:
-# NVIDIA-SMI 515.105.01   Driver Version: 515.105.01   CUDA Version: 11.7
-# torch.__version__ == '2.1.2+cu118'
-#
-# Changes relative to airbench:
-# - Increased width and reduced learning rate.
-# - Increased training duration to 15 epochs.
-#
-# If random flip is used instead of alternating, then decays to 94.95 average accuracy in n=100 runs.
-# With random flip and 16 epochs instead of 15, we get 94.97 in n=100 runs.
-# With random flip and 17, we get 95.01 in n=100 runs.
+# Simplified variant of airbench without compilation or lookahead optimization.
 
 #############################################
 #            Setup/Hyperparameters          #
@@ -45,7 +33,7 @@ torch.backends.cudnn.benchmark = True
 
 hyp = {
     'opt': {
-        'train_epochs': 15,
+        'train_epochs': 10.7,
         'batch_size': 1024,
         'lr': 10.0,                 # learning rate per 1024 examples
         'momentum': 0.85,
@@ -60,11 +48,11 @@ hyp = {
     },
     'net': {
         'widths': {
-            'block1': 128,
-            'block2': 384,
-            'block3': 384,
+            'block1': 64,
+            'block2': 256,
+            'block3': 256,
         },
-        'batchnorm_momentum': 0.6,
+        'batchnorm_momentum': 0.9,
         'scaling_factor': 1/9,
         'tta_level': 2,         # the level of test-time augmentation: 0=none, 1=mirror, 2=mirror+translate
     },
@@ -263,20 +251,6 @@ def init_whitening_conv(layer, train_set, eps=5e-4):
     layer.weight.data[:] = torch.cat((eigenvectors_scaled, -eigenvectors_scaled))
 
 ############################################
-#                Lookahead                 #
-############################################
-
-class LookaheadState:
-    def __init__(self, net):
-        self.net_ema = {k: v.clone() for k, v in net.state_dict().items()}
-
-    def update(self, net, decay):
-        for ema_param, net_param in zip(self.net_ema.values(), net.state_dict().values()):
-            if net_param.dtype in (torch.half, torch.float):
-                ema_param.lerp_(net_param, 1-decay)
-                net_param.copy_(ema_param)
-
-############################################
 #                 Logging                  #
 ############################################
 
@@ -393,11 +367,8 @@ def main(run):
         indices = torch.sum(torch.ge(x[:, None], xp[None, :]), 1) - 1
         indices = torch.clamp(indices, 0, len(m) - 1)
         return m[indices] * x + b[indices]
-    lr_schedule = triangle(total_train_steps, start=0.2, end=0.07, peak=0.23)
+    lr_schedule = triangle(total_train_steps, start=0.2, end=0, peak=0.2)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda i: lr_schedule[i])
-
-    alpha_schedule = 0.95**5 * (torch.arange(total_train_steps+1) / total_train_steps)**3
-    lookahead_state = LookaheadState(model)
 
     # For accurately timing GPU code
     starter = torch.cuda.Event(enable_timing=True)
@@ -433,13 +404,7 @@ def main(run):
             scheduler.step()
 
             current_steps += 1
-
-            if current_steps % 5 == 0:
-                lookahead_state.update(model, decay=alpha_schedule[current_steps].item())
-
             if current_steps >= total_train_steps:
-                if lookahead_state is not None:
-                    lookahead_state.update(model, decay=1.0)
                 break
 
         ender.record()
