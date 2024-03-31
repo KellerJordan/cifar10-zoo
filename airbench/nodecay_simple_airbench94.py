@@ -1,6 +1,4 @@
-# airbench94_simple.py
-#
-# Simplified variant of airbench without compilation or lookahead optimization.
+# 94.02 in n=100
 
 #############################################
 #            Setup/Hyperparameters          #
