@@ -308,10 +308,10 @@ def main(run):
 
     norm_biases = [p for k, p in model.named_parameters() if 'norm' in k and p.requires_grad]
     conv_weights = [p for k, p in model.named_parameters() if 'conv' in k and p.requires_grad]
-    param_configs = [dict(params=norm_biases, lr=lr_biases, weight_decay=wd/lr_biases),
-                     dict(params=conv_weights, lr=25 * lr, weight_decay=0),
-                     dict(params=[model[0].bias], lr=lr, weight_decay=wd/lr),
-                     dict(params=[model[-2].weight], lr=lr, weight_decay=0)]
+    param_configs = [dict(params=conv_weights, lr=25 * lr, weight_decay=0),
+                     dict(params=[model[-2].weight], lr=lr, weight_decay=0),
+                     dict(params=norm_biases, lr=lr_biases, weight_decay=wd/lr_biases),
+                     dict(params=[model[0].bias], lr=lr, weight_decay=wd/lr)]
     optimizer = torch.optim.SGD(param_configs, momentum=momentum, nesterov=True)
 
     def triangle(steps, start=0, end=0, peak=0.5):
