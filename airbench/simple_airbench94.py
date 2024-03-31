@@ -6,6 +6,8 @@
 #            Setup/Hyperparameters          #
 #############################################
 
+import airbench
+
 import os
 import sys
 import uuid
@@ -281,49 +283,6 @@ def print_training_details(variables, is_final_entry):
     print_columns(formatted, is_final_entry=is_final_entry)
 
 ############################################
-#               Evaluation                 #
-############################################
-
-def infer(model, loader, tta_level=0):
-
-    # Test-time augmentation strategy (for tta_level=2):
-    # 1. Flip/mirror the image left-to-right (50% of the time).
-    # 2. Translate the image by one pixel either up-and-left or down-and-right (50% of the time,
-    #    i.e. both happen 25% of the time).
-    #
-    # This creates 6 views per image (left/right times the two translations and no-translation),
-    # which we evaluate and then weight according to the given probabilities.
-
-    def infer_basic(inputs, net):
-        return net(inputs).clone()
-
-    def infer_mirror(inputs, net):
-        return 0.5 * net(inputs) + 0.5 * net(inputs.flip(-1))
-
-    def infer_mirror_translate(inputs, net):
-        logits = infer_mirror(inputs, net)
-        pad = 1
-        padded_inputs = F.pad(inputs, (pad,)*4, 'reflect')
-        inputs_translate_list = [
-            padded_inputs[:, :, 0:32, 0:32],
-            padded_inputs[:, :, 2:34, 2:34],
-        ]
-        logits_translate_list = [infer_mirror(inputs_translate, net)
-                                 for inputs_translate in inputs_translate_list]
-        logits_translate = torch.stack(logits_translate_list).mean(0)
-        return 0.5 * logits + 0.5 * logits_translate
-
-    model.eval()
-    test_images = loader.normalize(loader.images)
-    infer_fn = [infer_basic, infer_mirror, infer_mirror_translate][tta_level]
-    with torch.no_grad():
-        return torch.cat([infer_fn(inputs, model) for inputs in test_images.split(2000)])
-
-def evaluate(model, loader, tta_level=0):
-    logits = infer(model, loader, tta_level)
-    return (logits.argmax(1) == loader.labels).float().mean().item()
-
-############################################
 #                Training                  #
 ############################################
 
@@ -344,9 +303,6 @@ def main(run):
     loss_fn = nn.CrossEntropyLoss(label_smoothing=hyp['opt']['label_smoothing'], reduction='none')
     test_loader = CifarLoader('cifar10', train=False, batch_size=2000)
     train_loader = CifarLoader('cifar10', train=True, batch_size=batch_size, aug=hyp['aug'])
-    if run == 'warmup':
-        # The only purpose of the first run is to warmup, so we can use dummy data
-        train_loader.labels = torch.randint(0, 10, size=(len(train_loader.labels),), device=train_loader.labels.device)
     total_train_steps = ceil(len(train_loader) * epochs)
 
     model = make_net()
@@ -418,7 +374,7 @@ def main(run):
         # Save the accuracy and loss from the last training batch of the epoch
         train_acc = (outputs.detach().argmax(1) == labels).float().mean().item()
         train_loss = loss.item() / batch_size
-        val_acc = evaluate(model, test_loader, tta_level=0)
+        val_acc = airbench.evaluate(model, test_loader, tta_level=0)
         print_training_details(locals(), is_final_entry=False)
         run = None # Only print the run number once
 
@@ -427,7 +383,7 @@ def main(run):
     ####################
 
     starter.record()
-    tta_val_acc = evaluate(model, test_loader, tta_level=hyp['net']['tta_level'])
+    tta_val_acc = airbench.evaluate(model, test_loader, tta_level=hyp['net']['tta_level'])
     ender.record()
     torch.cuda.synchronize()
     total_time_seconds += 1e-3 * starter.elapsed_time(ender)
@@ -442,7 +398,6 @@ if __name__ == "__main__":
         code = f.read()
 
     print_columns(logging_columns_list, is_head=True)
-    #main('warmup')
     accs = torch.tensor([main(run) for run in range(25)])
     print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
