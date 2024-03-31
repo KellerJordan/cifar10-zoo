@@ -8,12 +8,7 @@ import torchvision
 import torchvision.transforms as T
 
 
-@torch.no_grad
 def infer(model, loader, tta_level=0):
-    
-    test_images = loader.normalize(loader.images)
-    
-    model.eval()
     
     def infer_basic(inputs, net):
         return net(inputs).clone()
@@ -34,10 +29,13 @@ def infer(model, loader, tta_level=0):
         logits_translate = torch.stack(logits_translate_list).mean(0)
         return 0.5 * logits + 0.5 * logits_translate
 
+    model.eval()
+    test_images = loader.normalize(loader.images)
     infer_fn = [infer_basic, infer_mirror, infer_mirror_translate][tta_level]
-    return torch.cat([infer_fn(inputs, model) for inputs in test_images.split(2000)])
+    with torch.no_grad():
+        return torch.cat([infer_fn(inputs, model) for inputs in test_images.split(2000)])
 
-def evaluate(model, loader, tta_level=1):
+def evaluate(model, loader, tta_level=0):
     logits = infer(model, loader, tta_level)
     return (logits.argmax(1) == loader.labels).float().mean().item()
 
@@ -97,7 +95,7 @@ def batch_cutout(inputs, size):
 
 class CifarLoader:
 
-    def __init__(self, path, train=True, batch_size=500, aug=None, drop_last=None, shuffle=None, detflip=True, gpu=0):
+    def __init__(self, path, train=True, batch_size=500, aug=None, drop_last=None, shuffle=None, altflip=False, gpu=0):
 
         data_path = os.path.join(path, 'train.pt' if train else 'test.pt')
         if not os.path.exists(data_path):
@@ -122,7 +120,7 @@ class CifarLoader:
         self.batch_size = batch_size
         self.drop_last = train if drop_last is None else drop_last
         self.shuffle = train if shuffle is None else shuffle
-        self.detflip = detflip
+        self.altflip = altflip
 
     def __len__(self):
         return len(self.images)//self.batch_size if self.drop_last else ceil(len(self.images)/self.batch_size)
@@ -152,7 +150,7 @@ class CifarLoader:
             images = self.proc_images['norm']
         # Flip all images together every other epoch. This increases diversity relative to random flipping
         if self.aug.get('flip', False):
-            if self.detflip:
+            if self.altflip:
                 if self.epoch % 2 == 1:
                     images = images.flip(-1)
             else:
@@ -200,23 +198,23 @@ class LookaheadState:
         for ema_param, net_param in zip(self.net_ema.values(), net.state_dict().values()):
             if net_param.dtype in (torch.half, torch.float):
                 ema_param.lerp_(net_param, 1-decay)
-                # Copy the ema parameters back to the network, similarly to the Lookahead optimizer
                 net_param.copy_(ema_param)
 
 ############################################
 #                 Logging                  #
 ############################################
 
-def print_columns(columns_list, is_head=False, is_final_entry=False):
+def print_columns(columns_list, is_head=False, is_final_entry=False, print_cols=True):
     print_string = ''
     for col in columns_list:
         print_string += '|  %s  ' % col
     print_string += '|'
     if is_head:
         print('-'*len(print_string))
-    print(print_string)
-    if is_head or is_final_entry:
-        print('-'*len(print_string))
+    if print_cols:
+        print(print_string)
+        if is_head or is_final_entry:
+            print('-'*len(print_string))
 
 logging_columns_list = ['run   ', 'epoch', 'train_loss', 'train_acc', 'val_acc', 'tta_val_acc', 'total_time_seconds']
 def print_training_details(variables, is_final_entry):
@@ -242,6 +240,10 @@ def train(train_loader, epochs, label_smoothing, learning_rate, bias_scaler, mom
 
     train_loader.epoch = 0
 
+    is_warmup = run in (-1, 'warmup')
+    if is_warmup and verbose:
+        run = 'warmup'
+        print_columns(logging_columns_list, is_head=True, print_cols=False)
     if run == 0 and verbose:
         print_columns(logging_columns_list, is_head=True)
 
@@ -256,8 +258,17 @@ def train(train_loader, epochs, label_smoothing, learning_rate, bias_scaler, mom
     lr_biases = lr * bias_scaler
 
     loss_fn = nn.CrossEntropyLoss(label_smoothing=label_smoothing, reduction='none')
-
     test_loader = CifarLoader('cifar10', train=False, batch_size=2000)
+    total_train_steps = ceil(len(train_loader) * epochs)
+
+    model = make_net()
+    current_steps = 0
+
+    norm_biases = [p for k, p in model.named_parameters() if 'norm' in k and p.requires_grad]
+    other_params = [p for k, p in model.named_parameters() if 'norm' not in k and p.requires_grad]
+    param_configs = [dict(params=norm_biases, lr=lr_biases, weight_decay=wd/lr_biases),
+                     dict(params=other_params, lr=lr, weight_decay=wd/lr)]
+    optimizer = torch.optim.SGD(param_configs, momentum=momentum, nesterov=True)
 
     def triangle(steps, start=0, end=0, peak=0.5):
         xp = torch.tensor([0, int(peak * steps), steps])
@@ -268,25 +279,15 @@ def train(train_loader, epochs, label_smoothing, learning_rate, bias_scaler, mom
         indices = torch.sum(torch.ge(x[:, None], xp[None, :]), 1) - 1
         indices = torch.clamp(indices, 0, len(m) - 1)
         return m[indices] * x + b[indices]
-
-    total_train_steps = ceil(len(train_loader) * epochs)
     lr_schedule = triangle(total_train_steps, start=0.2, end=0.07, peak=0.23)
-
-    model = make_net()
-    lookahead_state = None
-    current_steps = 0
-
-    norm_biases = [p for k, p in model.named_parameters() if 'norm' in k and p.requires_grad]
-    other_params = [p for k, p in model.named_parameters() if 'norm' not in k and p.requires_grad]
-    param_configs = [dict(params=norm_biases, lr=lr_biases, weight_decay=wd/lr_biases),
-                     dict(params=other_params, lr=lr, weight_decay=wd/lr)]
-    optimizer = torch.optim.SGD(param_configs, momentum=momentum, nesterov=True)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda i: lr_schedule[i])
+
+    alpha_schedule = 0.95**5 * (torch.arange(total_train_steps+1) / total_train_steps)**3
+    lookahead_state = LookaheadState(model)
 
     # For accurately timing GPU code
     starter = torch.cuda.Event(enable_timing=True)
     ender = torch.cuda.Event(enable_timing=True)
-
     total_time_seconds = 0.0
 
     # Initialize the whitening layer using training images
@@ -319,21 +320,18 @@ def train(train_loader, epochs, label_smoothing, learning_rate, bias_scaler, mom
 
             current_steps += 1
 
-            if epoch >= 3 and current_steps % 5 == 0:
-                if lookahead_state is None:
-                    lookahead_state = LookaheadState(model)
-                else:
-                    # We warm up our ema's decay/momentum value over training (this lets us move fast, then average strongly at the end).
-                    base_rho = 0.95 ** 5
-                    rho = base_rho * (current_steps / total_train_steps) ** 3.0
-                    lookahead_state.update(model, decay=rho)
+            if current_steps % 5 == 0:
+                lookahead_state.update(model, decay=alpha_schedule[current_steps].item())
 
             if current_steps >= total_train_steps:
+                if lookahead_state is not None:
+                    lookahead_state.update(model, decay=1.0)
                 break
 
-        if lookahead_state is not None:
-            # Copy back parameters a final time after each epoch
-            lookahead_state.update(model, decay=1.0)
+            if verbose and is_warmup:
+                epoch = None
+                print_training_details(locals(), is_final_entry=False)
+                return
 
         ender.record()
         torch.cuda.synchronize()
@@ -348,10 +346,7 @@ def train(train_loader, epochs, label_smoothing, learning_rate, bias_scaler, mom
             # Save the accuracy and loss from the last training batch of the epoch
             train_acc = (outputs.detach().argmax(1) == labels).float().mean().item()
             train_loss = loss.item() / batch_size
-
             val_acc = evaluate(model, test_loader, tta_level=0)
-            tta_val_acc = None
-
             print_training_details(locals(), is_final_entry=False)
             run = None # Only print the run number once
 
