@@ -130,13 +130,13 @@ def train(train_loader, test_loader=None, epochs=hyp['opt']['epochs'], lr=hyp['o
     wd = hyp['opt']['wd']
 
     total_train_steps = len(train_loader) * epochs
+    model = make_rn18()
+
+    optimizer = torch.optim.SGD(model.parameters(), lr=lr/batch_size, momentum=momentum, nesterov=True,
+                                weight_decay=wd*batch_size)
     lr_schedule = np.interp(np.arange(1+total_train_steps),
                             [0, int(0.2 * total_train_steps), total_train_steps],
                             [0.2, 1, 0]) # Triangular learning rate schedule
-
-    model = make_rn18()
-    optimizer = torch.optim.SGD(model.parameters(), lr=lr/batch_size, momentum=momentum, nesterov=True,
-                                weight_decay=wd*batch_size)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule.__getitem__)
 
     train_loss, train_acc = [], []
