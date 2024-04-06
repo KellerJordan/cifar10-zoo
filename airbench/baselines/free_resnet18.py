@@ -139,7 +139,7 @@ def train(train_loader, test_loader=None, epochs=hyp['opt']['epochs'], lr=hyp['o
                                 weight_decay=wd*batch_size)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule.__getitem__)
 
-    train_loss, train_acc, test_acc = [], [], [torch.nan]
+    train_loss, train_acc = [], []
 
     it = tqdm(range(epochs))
     for epoch in it:
@@ -156,7 +156,8 @@ def train(train_loader, test_loader=None, epochs=hyp['opt']['epochs'], lr=hyp['o
             scheduler.step()
             it.set_description('Training loss=%.4f acc=%.4f' % (train_loss[-1], train_acc[-1]))
 
-    test_acc.append(evaluate(model, test_loader))
+    test_acc = evaluate(model, test_loader)
+    print('Test acc=%.4f' % test_acc)
     log = dict(train_loss=train_loss, train_acc=train_acc, test_acc=test_acc)
     return model, log 
 
@@ -171,8 +172,7 @@ if __name__ == '__main__':
     accs = []
     for _ in range(5):
         model, log = train(train_loader)
-        acc = log['test_acc'][-1]
-        accs.append(acc)
+        accs.append(log['test_acc'])
     log = dict(hyp=hyp, code=code, accs=accs)
 
     log_dir = os.path.join('logs', str(uuid.uuid4()))
