@@ -144,11 +144,11 @@ def train(train_loader, test_loader=None, epochs=hyp['opt']['epochs'], lr=hyp['o
     free = hyp['opt']['free']
     if free:
         import schedulefree
-        optimizer = schedulefree.SGDScheduleFree(model.parameters(), lr=lr/batch_size, momentum=momentum,
-                                                 weight_decay=wd*batch_size)
+        optimizer = schedulefree.SGDScheduleFree(model.parameters(), lr=lr, momentum=momentum,
+                                                 weight_decay=wd, warmup_steps=500)
     else:
-        optimizer = torch.optim.SGD(model.parameters(), lr=lr/batch_size, momentum=momentum, nesterov=True,
-                                    weight_decay=wd*batch_size)
+        optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=momentum, nesterov=True,
+                                    weight_decay=wd)
         lr_schedule = np.interp(np.arange(1+total_train_steps),
                                 [0, int(0.2 * total_train_steps), total_train_steps],
                                 [0.2, 1, 0]) # Triangular learning rate schedule
@@ -164,11 +164,11 @@ def train(train_loader, test_loader=None, epochs=hyp['opt']['epochs'], lr=hyp['o
             optimizer.train()
         for inputs, labels in train_loader:
             outputs = model(inputs)
-            loss = F.cross_entropy(outputs, labels, reduction='none')
-            train_loss.append(loss.mean().item())
+            loss = F.cross_entropy(outputs, labels)
+            train_loss.append(loss.item())
             train_acc.append((outputs.detach().argmax(1) == labels).float().mean().item())
             optimizer.zero_grad(set_to_none=True)
-            loss.sum().backward()
+            loss.backward()
             optimizer.step()
             if not free:
                 scheduler.step()
