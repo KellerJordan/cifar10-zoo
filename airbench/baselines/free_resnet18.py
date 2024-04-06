@@ -184,6 +184,7 @@ def train(train_loader, test_loader=None, epochs=hyp['opt']['epochs'], lr=hyp['o
 
     test_acc = evaluate(model, test_loader)
     print('Test acc=%.4f' % test_acc)
+    print('Test acc (w/ tta)=%.4f' % evaluate(model, test_loader, tta_level=2))
     log = dict(train_loss=train_loss, train_acc=train_acc, test_acc=test_acc)
     return model, log 
 
