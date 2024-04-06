@@ -22,7 +22,16 @@ hyp = {
     'opt': {
         'epochs': 32,
         'batch_size': 500,
-        'lr': 0.2,
+        ## sgd -------------------
+        ## => ~94% accuracy
+        #'free': False,
+        #'lr': 0.2,
+        #'momentum': 0.9,
+        #'wd': 5e-4,
+        ## scheduler free sgd ----
+        ## => ~90% accuracy
+        'free': True,
+        'lr': 0.2, # this is the best learning I could find across a wide sweep
         'momentum': 0.9,
         'wd': 5e-4,
     },
@@ -132,12 +141,18 @@ def train(train_loader, test_loader=None, epochs=hyp['opt']['epochs'], lr=hyp['o
     total_train_steps = len(train_loader) * epochs
     model = make_rn18()
 
-    optimizer = torch.optim.SGD(model.parameters(), lr=lr/batch_size, momentum=momentum, nesterov=True,
-                                weight_decay=wd*batch_size)
-    lr_schedule = np.interp(np.arange(1+total_train_steps),
-                            [0, int(0.2 * total_train_steps), total_train_steps],
-                            [0.2, 1, 0]) # Triangular learning rate schedule
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule.__getitem__)
+    free = hyp['opt']['free']
+    if free:
+        import schedulefree
+        optimizer = schedulefree.SGDScheduleFree(model.parameters(), lr=lr/batch_size, momentum=momentum,
+                                                 weight_decay=wd*batch_size)
+    else:
+        optimizer = torch.optim.SGD(model.parameters(), lr=lr/batch_size, momentum=momentum, nesterov=True,
+                                    weight_decay=wd*batch_size)
+        lr_schedule = np.interp(np.arange(1+total_train_steps),
+                                [0, int(0.2 * total_train_steps), total_train_steps],
+                                [0.2, 1, 0]) # Triangular learning rate schedule
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule.__getitem__)
 
     train_loss, train_acc = [], []
 
@@ -145,6 +160,8 @@ def train(train_loader, test_loader=None, epochs=hyp['opt']['epochs'], lr=hyp['o
     for epoch in it:
 
         model.train()
+        if free:
+            optimizer.train()
         for inputs, labels in train_loader:
             outputs = model(inputs)
             loss = F.cross_entropy(outputs, labels, reduction='none')
@@ -153,8 +170,17 @@ def train(train_loader, test_loader=None, epochs=hyp['opt']['epochs'], lr=hyp['o
             optimizer.zero_grad(set_to_none=True)
             loss.sum().backward()
             optimizer.step()
-            scheduler.step()
+            if not free:
+                scheduler.step()
             it.set_description('Training loss=%.4f acc=%.4f' % (train_loss[-1], train_acc[-1]))
+
+    if free:
+        optimizer.eval()
+        model.train() # (redundant)
+        with torch.no_grad():
+            for inputs, _ in train_loader:
+                model(inputs)
+        model.eval() # (redundant)
 
     test_acc = evaluate(model, test_loader)
     print('Test acc=%.4f' % test_acc)
