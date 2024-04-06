@@ -23,7 +23,7 @@ hyp = {
         'batch_size': 512,
         'lr': 0.2,
         'momentum': 0.9,
-        'wd': 5e-4,
+        'wd': 1e-3,
     },
     'aug': {
         'flip': True,
