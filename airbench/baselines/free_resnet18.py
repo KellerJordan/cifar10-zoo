@@ -31,9 +31,9 @@ hyp = {
         ## scheduler free sgd ----
         ## => ~90% accuracy
         'free': True,
-        'lr': 0.2, # this is the best learning I could find across a wide sweep
+        'lr': 10.0,
         'momentum': 0.9,
-        'wd': 5e-4,
+        'wd': 0.0005,
     },
     'aug': {
         'flip': True,
